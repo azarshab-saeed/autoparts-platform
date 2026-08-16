@@ -1,9 +1,8 @@
 openapi: 3.1.0
 info:
   title: Auto Parts Platform API
-  version: 0.8.0
-  description: Phase 8 contract. Adds inventory-backed network reservations, buyer tracking, store confirmation, ready-for-pickup
-    state, cancellation and expiry. Monetary integer fields use Iranian toman (application currency code IRT).
+  version: 0.9.0
+  description: Phase 9 contract. Adds atomic reservation fulfillment into a posted Sale, consuming held inventory exactly once and posting payments, AR, COGS and journals. Monetary integer fields use Iranian toman (application currency code IRT).
 servers:
 - url: http://localhost:8080
 components:
@@ -296,6 +295,25 @@ components:
           - accepted
           - ready
           - rejected
+    NetworkReservationFulfill:
+      type: object
+      properties:
+        customer_id:
+          type:
+          - string
+          - 'null'
+          format: uuid
+          description: Required when any amount remains due.
+        payment_method:
+          type: string
+          enum:
+          - cash
+          - card
+          - credit
+        payments:
+          type: array
+          items:
+            $ref: '#/components/schemas/PaymentPart'
     NetworkReservation:
       type: object
       required:
@@ -352,6 +370,7 @@ components:
           - pending
           - accepted
           - ready
+          - fulfilled
           - rejected
           - cancelled
           - expired
@@ -756,6 +775,7 @@ paths:
           - pending
           - accepted
           - ready
+          - fulfilled
           - rejected
           - cancelled
           - expired
@@ -785,6 +805,34 @@ paths:
           description: Reservation status changed
         '409':
           description: Invalid transition or ownership conflict
+  /v1/network/reservations/{id}/fulfill:
+    post:
+      description: Convert a ready reservation to a posted sale atomically. The held quantity is removed from both on_hand and reserved exactly once. Payments, AR, COGS, journal entries, inventory movement and outbox events are posted in the same transaction.
+      security:
+      - keycloakOIDC: []
+      parameters:
+      - in: path
+        name: id
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - in: header
+        name: Idempotency-Key
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NetworkReservationFulfill'
+      responses:
+        '201':
+          description: Reservation fulfilled and sale posted. Repeating fulfillment returns the already-linked sale instead of selling twice.
+        '409':
+          description: Reservation is not ready, has expired, inventory invariant failed, or credit sale is missing customer_id.
   /v1/me/reservations:
     get:
       description: List reservations of the authenticated mechanic/consumer.

@@ -540,6 +540,38 @@ func main() {
 		api.WriteJSON(w, http.StatusOK, out)
 	})))
 
+	protected.Handle("POST /v1/network/reservations/{id}/fulfill", auth.RequireRoles("owner", "admin", "cashier")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, _ := auth.ClaimsFrom(r.Context())
+		id, err := uuid.Parse(r.PathValue("id"))
+		if err != nil {
+			api.WriteError(w, api.BadRequest("invalid_reservation_id", "reservation id must be a UUID"))
+			return
+		}
+		var in struct {
+			CustomerID    *uuid.UUID          `json:"customer_id,omitempty"`
+			PaymentMethod string              `json:"payment_method,omitempty"`
+			Payments      []sales.PaymentPart `json:"payments,omitempty"`
+		}
+		if err := decodeJSON(r, &in); err != nil {
+			api.WriteError(w, err)
+			return
+		}
+		key := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
+		if key == "" {
+			api.WriteError(w, api.BadRequest("missing_idempotency_key", "Idempotency-Key header is required"))
+			return
+		}
+		out, err := salesSvc.FulfillReservation(r.Context(), sales.FulfillReservationCommand{
+			TenantID: c.TenantID, StoreID: c.StoreID, ActorUserID: c.UserID, ReservationID: id,
+			CustomerID: in.CustomerID, PaymentMethod: strings.TrimSpace(in.PaymentMethod), Payments: in.Payments, IdempotencyKey: key,
+		})
+		if err != nil {
+			api.WriteError(w, api.Conflict("reservation_fulfillment_rejected", err.Error()))
+			return
+		}
+		api.WriteJSON(w, http.StatusCreated, out)
+	})))
+
 	protected.Handle("POST /v1/sales", auth.RequireRoles("owner", "admin", "cashier")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		c, _ := auth.ClaimsFrom(r.Context())
 		var cmd sales.CreateSaleCommand

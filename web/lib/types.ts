@@ -136,7 +136,15 @@ export type StoreNetworkProfile = {
   longitude?: number;
 };
 
-export type NetworkReservationStatus = "pending" | "accepted" | "ready" | "rejected" | "cancelled" | "expired";
+export type NetworkReservationStatus = "pending" | "accepted" | "ready" | "fulfilled" | "rejected" | "cancelled" | "expired";
+export type ReservationFulfillmentResult = {
+  reservation_id: string;
+  sale_id: string;
+  total_amount: number;
+  paid_amount: number;
+  due_amount: number;
+  status: string;
+};
 export type NetworkReservation = {
   id: string;
   offer_id: string;

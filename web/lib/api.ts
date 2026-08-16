@@ -1,4 +1,4 @@
-import { addMockPartyBalance, applyMockAdjustment, applyMockPurchase, applyMockPurchaseReturn, applyMockReorder, applyMockSaleReturn, applyMockSettlement, getMockCustomerBalances, getMockInventory, getMockSupplierBalances, mockCustomers, mockProducts, mockPurchaseDetail, mockSaleDetail, mockSuppliers, mockNetworkResults, getMockNetworkProfile, setMockNetworkProfile, getMockStoreOffers, setMockStoreOffer, createMockReservation, getMockBuyerReservations, getMockStoreReservations, cancelMockReservation, transitionMockReservation } from "./mock";
+import { addMockPartyBalance, applyMockAdjustment, applyMockPurchase, applyMockPurchaseReturn, applyMockReorder, applyMockSaleReturn, applyMockSettlement, getMockCustomerBalances, getMockInventory, getMockSupplierBalances, mockCustomers, mockProducts, mockPurchaseDetail, mockSaleDetail, mockSuppliers, mockNetworkResults, getMockNetworkProfile, setMockNetworkProfile, getMockStoreOffers, setMockStoreOffer, createMockReservation, getMockBuyerReservations, getMockStoreReservations, cancelMockReservation, transitionMockReservation, fulfillMockReservation } from "./mock";
 import type {
   Customer,
   InventoryAdjustmentResult,
@@ -15,7 +15,7 @@ import type {
   SaleItem,
   SettlementResult,
   Supplier,
-  UserSession, NetworkSearchResult, NetworkStoreOffer, StoreNetworkProfile, NetworkReservation, NetworkReservationStatus
+  UserSession, NetworkSearchResult, NetworkStoreOffer, StoreNetworkProfile, NetworkReservation, NetworkReservationStatus, ReservationFulfillmentResult
 } from "./types";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
@@ -222,4 +222,12 @@ export async function getStoreReservations(session:UserSession,status="all"):Pro
 }
 export async function transitionStoreReservation(session:UserSession,id:string,status:"accepted"|"ready"|"rejected"):Promise<NetworkReservation>{
   if(MOCK_MODE)return transitionMockReservation(id,status); return request<NetworkReservation>(`/v1/network/reservations/${encodeURIComponent(id)}`,{method:"PATCH",body:JSON.stringify({status})},session.token);
+}
+export async function fulfillStoreReservation(session:UserSession,id:string,paymentMethod:"cash"|"card"|"credit",customerId?:string,payments?:PaymentPart[]):Promise<ReservationFulfillmentResult>{
+  if(MOCK_MODE){await new Promise(r=>setTimeout(r,250));return fulfillMockReservation(id);}
+  return request<ReservationFulfillmentResult>(`/v1/network/reservations/${encodeURIComponent(id)}/fulfill`,{
+    method:"POST",
+    headers:{"Idempotency-Key":crypto.randomUUID()},
+    body:JSON.stringify({payment_method:paymentMethod,...(customerId?{customer_id:customerId}:{}),...(payments?{payments}:{})})
+  },session.token);
 }
