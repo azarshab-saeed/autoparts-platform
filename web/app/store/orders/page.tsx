@@ -41,7 +41,7 @@ export default function StoreOrders(){
     setBusy(r.id);setError("");
     try{
       const out=await fulfillStoreReservation(session,r.id,method);
-      setItems(xs=>xs.map(x=>x.id===r.id?{...x,status:"fulfilled"}:x).filter(x=>status==="all"||x.status===status));
+      setItems(xs=>xs.map(x=>x.id===r.id?{...x,status:"fulfilled" as const}:x).filter(x=>status==="all"||x.status===status));
       window.alert(`فروش ثبت شد. شناسه فروش: ${out.sale_id}`);
     }catch(e){setError(e instanceof Error?e.message:"تحویل و ثبت فروش انجام نشد");}
     finally{setBusy("");}
