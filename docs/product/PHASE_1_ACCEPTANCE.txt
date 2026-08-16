@@ -1,0 +1,7 @@
+Phase 1 Acceptance:
+- Store admin screens specified
+- Mechanic screens specified
+- Consumer behavior specified
+- UI states specified
+- UI API contract specified
+- Roadmap created

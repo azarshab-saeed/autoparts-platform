@@ -1,0 +1,9 @@
+import type { SVGProps } from "react";
+const base = { width: 20, height: 20, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.8, strokeLinecap: "round" as const, strokeLinejoin: "round" as const };
+export const HomeIcon=(p:SVGProps<SVGSVGElement>)=><svg {...base}{...p}><path d="M3 11.5 12 4l9 7.5"/><path d="M5.5 10v10h13V10"/></svg>;
+export const CartIcon=(p:SVGProps<SVGSVGElement>)=><svg {...base}{...p}><path d="M3 4h2l2.1 10.1a2 2 0 0 0 2 1.6h7.8a2 2 0 0 0 2-1.6L20 7H6"/><circle cx="9" cy="20" r="1"/><circle cx="17" cy="20" r="1"/></svg>;
+export const BoxIcon=(p:SVGProps<SVGSVGElement>)=><svg {...base}{...p}><path d="m4 7 8-4 8 4-8 4-8-4Z"/><path d="M4 7v10l8 4 8-4V7M12 11v10"/></svg>;
+export const UsersIcon=(p:SVGProps<SVGSVGElement>)=><svg {...base}{...p}><path d="M16 20v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 20v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>;
+export const SearchIcon=(p:SVGProps<SVGSVGElement>)=><svg {...base}{...p}><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg>;
+export const ChartIcon=(p:SVGProps<SVGSVGElement>)=><svg {...base}{...p}><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>;
+export const SettingsIcon=(p:SVGProps<SVGSVGElement>)=><svg {...base}{...p}><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.83 2.83-.06-.06a1.7 1.7 0 0 0-1.88-.34 1.7 1.7 0 0 0-1.03 1.56V21h-4v-.07A1.7 1.7 0 0 0 9 19.37a1.7 1.7 0 0 0-1.88.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.63 15a1.7 1.7 0 0 0-1.56-1.03H3v-4h.07A1.7 1.7 0 0 0 4.63 9a1.7 1.7 0 0 0-.34-1.88l-.06-.06 2.83-2.83.06.06A1.7 1.7 0 0 0 9 4.63a1.7 1.7 0 0 0 1.03-1.56V3h4v.07A1.7 1.7 0 0 0 15 4.63a1.7 1.7 0 0 0 1.88-.34l.06-.06 2.83 2.83-.06.06A1.7 1.7 0 0 0 19.37 9a1.7 1.7 0 0 0 1.56 1.03H21v4h-.07A1.7 1.7 0 0 0 19.4 15Z"/></svg>;

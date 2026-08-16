@@ -1,0 +1,169 @@
+{
+  "realm": "autoparts",
+  "displayName": "AutoParts Platform",
+  "enabled": true,
+  "registrationAllowed": false,
+  "resetPasswordAllowed": true,
+  "rememberMe": true,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "roles": {
+    "realm": [
+      {
+        "name": "owner",
+        "description": "Store owner"
+      },
+      {
+        "name": "admin",
+        "description": "Store administrator"
+      },
+      {
+        "name": "cashier",
+        "description": "Sales cashier"
+      },
+      {
+        "name": "warehouse",
+        "description": "Warehouse operator"
+      },
+      {
+        "name": "accountant",
+        "description": "Accountant"
+      },
+      {
+        "name": "mechanic",
+        "description": "Mechanic user"
+      },
+      {
+        "name": "consumer",
+        "description": "Consumer user"
+      }
+    ]
+  },
+  "clients": [
+    {
+      "clientId": "autoparts-api",
+      "name": "AutoParts API",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "bearerOnly": true,
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false
+    },
+    {
+      "clientId": "autoparts-web",
+      "name": "AutoParts Web",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "fullScopeAllowed": true,
+      "redirectUris": [
+        "http://localhost:3000/*"
+      ],
+      "webOrigins": [
+        "http://localhost:3000"
+      ],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "http://localhost:3000/*"
+      },
+      "protocolMappers": [
+        {
+          "name": "tenant-id",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "user.attribute": "tenant_id",
+            "claim.name": "tenant_id",
+            "jsonType.label": "String",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true",
+            "introspection.token.claim": "true"
+          }
+        },
+        {
+          "name": "store-id",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "user.attribute": "store_id",
+            "claim.name": "store_id",
+            "jsonType.label": "String",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true",
+            "introspection.token.claim": "true"
+          }
+        },
+        {
+          "name": "autoparts-api-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.client.audience": "autoparts-api",
+            "id.token.claim": "false",
+            "access.token.claim": "true",
+            "introspection.token.claim": "true"
+          }
+        }
+      ]
+    }
+  ],
+  "users": [
+    {
+      "id": "44444444-4444-4444-4444-444444444444",
+      "username": "owner@example.com",
+      "email": "owner@example.com",
+      "emailVerified": true,
+      "enabled": true,
+      "firstName": "رضا",
+      "lastName": "رضایی",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "ChangeMe123!",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "owner"
+      ],
+      "attributes": {
+        "tenant_id": [
+          "11111111-1111-1111-1111-111111111111"
+        ],
+        "store_id": [
+          "22222222-2222-2222-2222-222222222222"
+        ]
+      }
+    },
+    {
+      "id": "88888888-8888-8888-8888-888888888888",
+      "username": "mechanic@example.com",
+      "email": "mechanic@example.com",
+      "emailVerified": true,
+      "enabled": true,
+      "firstName": "مهدی",
+      "lastName": "مکانیک",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "ChangeMe123!",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "mechanic"
+      ]
+    }
+  ],
+  "defaultSignatureAlgorithm": "RS256"
+}

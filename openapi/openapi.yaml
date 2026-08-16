@@ -1,0 +1,812 @@
+openapi: 3.1.0
+info:
+  title: Auto Parts Platform API
+  version: 0.8.0
+  description: Phase 8 contract. Adds inventory-backed network reservations, buyer tracking, store confirmation, ready-for-pickup
+    state, cancellation and expiry. Monetary integer fields use Iranian toman (application currency code IRT).
+servers:
+- url: http://localhost:8080
+components:
+  securitySchemes:
+    keycloakOIDC:
+      type: openIdConnect
+      openIdConnectUrl: http://localhost:8081/realms/autoparts/.well-known/openid-configuration
+  schemas:
+    Error:
+      type: object
+      required:
+      - error
+      properties:
+        error:
+          type: object
+          required:
+          - code
+          - message
+          properties:
+            code:
+              type: string
+            message:
+              type: string
+            details:
+              type: object
+              additionalProperties: true
+    PaymentPart:
+      type: object
+      required:
+      - method
+      - amount
+      properties:
+        method:
+          type: string
+          enum:
+          - cash
+          - card
+        amount:
+          type: integer
+          minimum: 1
+    SaleCreate:
+      type: object
+      required:
+      - warehouse_id
+      - items
+      properties:
+        warehouse_id:
+          type: string
+          format: uuid
+        customer_id:
+          type:
+          - string
+          - 'null'
+          format: uuid
+        payment_method:
+          type: string
+          enum:
+          - cash
+          - card
+          - credit
+          description: Backward-compatible single-method input. For partial/mixed payment send payments instead.
+        payments:
+          type: array
+          items:
+            $ref: '#/components/schemas/PaymentPart'
+        items:
+          type: array
+          minItems: 1
+          items:
+            type: object
+            required:
+            - product_id
+            - qty
+            - unit_price
+            properties:
+              product_id:
+                type: string
+                format: uuid
+              qty:
+                type: number
+                exclusiveMinimum: 0
+              unit_price:
+                type: integer
+                minimum: 0
+    PurchaseCreate:
+      type: object
+      required:
+      - warehouse_id
+      - supplier_id
+      - items
+      properties:
+        warehouse_id:
+          type: string
+          format: uuid
+        supplier_id:
+          type: string
+          format: uuid
+        payment_method:
+          type: string
+          enum:
+          - cash
+          - card
+          - credit
+        payments:
+          type: array
+          items:
+            $ref: '#/components/schemas/PaymentPart'
+        items:
+          type: array
+          minItems: 1
+          items:
+            type: object
+            required:
+            - product_id
+            - qty
+            - unit_cost
+            properties:
+              product_id:
+                type: string
+                format: uuid
+              qty:
+                type: number
+                exclusiveMinimum: 0
+              unit_cost:
+                type: integer
+                minimum: 0
+    Settlement:
+      type: object
+      required:
+      - method
+      - amount
+      properties:
+        customer_id:
+          type: string
+          format: uuid
+        supplier_id:
+          type: string
+          format: uuid
+        method:
+          type: string
+          enum:
+          - cash
+          - card
+        amount:
+          type: integer
+          minimum: 1
+        note:
+          type: string
+    ReturnCreate:
+      type: object
+      required:
+      - refund_method
+      - items
+      properties:
+        sale_id:
+          type: string
+          format: uuid
+        purchase_id:
+          type: string
+          format: uuid
+        refund_method:
+          type: string
+          enum:
+          - cash
+          - card
+          - credit_balance
+        items:
+          type: array
+          minItems: 1
+          items:
+            type: object
+            required:
+            - source_item_id
+            - qty
+            properties:
+              source_item_id:
+                type: string
+                format: uuid
+              qty:
+                type: number
+                exclusiveMinimum: 0
+    InventoryAdjustment:
+      type: object
+      required:
+      - warehouse_id
+      - product_id
+      - qty_delta
+      - reason
+      properties:
+        warehouse_id:
+          type: string
+          format: uuid
+        product_id:
+          type: string
+          format: uuid
+        qty_delta:
+          type: number
+          not:
+            const: 0
+        reason:
+          type: string
+          minLength: 1
+    ReorderPoint:
+      type: object
+      required:
+      - warehouse_id
+      - product_id
+      - min_qty
+      - target_qty
+      properties:
+        warehouse_id:
+          type: string
+          format: uuid
+        product_id:
+          type: string
+          format: uuid
+        min_qty:
+          type: number
+          minimum: 0
+        target_qty:
+          type: number
+          minimum: 0
+    NetworkOfferUpdate:
+      type: object
+      required:
+      - warehouse_id
+      - selling_price
+      - visible
+      - allow_reservation
+      properties:
+        warehouse_id:
+          type: string
+          format: uuid
+        selling_price:
+          type: integer
+          minimum: 1
+        visible:
+          type: boolean
+        allow_reservation:
+          type: boolean
+    NetworkStoreProfileUpdate:
+      type: object
+      required:
+      - network_enabled
+      - address
+      - phone
+      - city
+      properties:
+        network_enabled:
+          type: boolean
+        address:
+          type: string
+        phone:
+          type: string
+        city:
+          type: string
+        latitude:
+          type:
+          - number
+          - 'null'
+          minimum: -90
+          maximum: 90
+        longitude:
+          type:
+          - number
+          - 'null'
+          minimum: -180
+          maximum: 180
+    NetworkReservationCreate:
+      type: object
+      required:
+      - offer_id
+      - qty
+      properties:
+        offer_id:
+          type: string
+          format: uuid
+        qty:
+          type: number
+          exclusiveMinimum: 0
+          maximum: 1000
+    NetworkReservationStatusUpdate:
+      type: object
+      required:
+      - status
+      properties:
+        status:
+          type: string
+          enum:
+          - accepted
+          - ready
+          - rejected
+    NetworkReservation:
+      type: object
+      required:
+      - id
+      - offer_id
+      - product_id
+      - product_title
+      - store_id
+      - store_name
+      - qty
+      - unit_price
+      - total_amount
+      - status
+      - expires_at
+      - created_at
+      - updated_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        offer_id:
+          type: string
+          format: uuid
+        product_id:
+          type: string
+          format: uuid
+        product_title:
+          type: string
+        store_id:
+          type: string
+          format: uuid
+        store_name:
+          type: string
+        address:
+          type: string
+        phone:
+          type: string
+        buyer_user_id:
+          type: string
+          format: uuid
+        buyer_name:
+          type: string
+        buyer_email:
+          type: string
+        qty:
+          type: number
+        unit_price:
+          type: integer
+        total_amount:
+          type: integer
+        status:
+          type: string
+          enum:
+          - pending
+          - accepted
+          - ready
+          - rejected
+          - cancelled
+          - expired
+        expires_at:
+          type: string
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+paths:
+  /healthz:
+    get:
+      responses:
+        '200':
+          description: healthy
+        '503':
+          description: database unavailable
+  /v1/me:
+    get:
+      security:
+      - keycloakOIDC: []
+      responses:
+        '200':
+          description: authenticated store context
+  /v1/products:
+    get:
+      security:
+      - keycloakOIDC: []
+      responses:
+        '200':
+          description: product page
+    post:
+      security:
+      - keycloakOIDC: []
+      responses:
+        '201':
+          description: product created
+  /v1/customers:
+    get:
+      security:
+      - keycloakOIDC: []
+      responses:
+        '200':
+          description: customer page
+    post:
+      security:
+      - keycloakOIDC: []
+      responses:
+        '201':
+          description: customer created
+  /v1/suppliers:
+    get:
+      security:
+      - keycloakOIDC: []
+      responses:
+        '200':
+          description: supplier page
+    post:
+      security:
+      - keycloakOIDC: []
+      responses:
+        '201':
+          description: supplier created
+  /v1/sales:
+    post:
+      security:
+      - keycloakOIDC: []
+      parameters:
+      - in: header
+        name: Idempotency-Key
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SaleCreate'
+      responses:
+        '201':
+          description: Sale posted. Response includes total_amount
+          paid_amount and due_amount.: null
+        '409':
+          description: stock or business conflict
+  /v1/sales/{id}:
+    get:
+      security:
+      - keycloakOIDC: []
+      parameters:
+      - in: path
+        name: id
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: Sale with returnable line quantities
+        '404':
+          description: sale not found
+  /v1/purchases:
+    post:
+      security:
+      - keycloakOIDC: []
+      parameters:
+      - in: header
+        name: Idempotency-Key
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PurchaseCreate'
+      responses:
+        '201':
+          description: Purchase posted with paid/due state and weighted-average inventory update
+  /v1/purchases/{id}:
+    get:
+      security:
+      - keycloakOIDC: []
+      parameters:
+      - in: path
+        name: id
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: Purchase with returnable line quantities
+        '404':
+          description: purchase not found
+  /v1/accounts/customers:
+    get:
+      security:
+      - keycloakOIDC: []
+      responses:
+        '200':
+          description: Customer balances. Positive balance means the customer owes the store.
+  /v1/accounts/suppliers:
+    get:
+      security:
+      - keycloakOIDC: []
+      responses:
+        '200':
+          description: Supplier balances. Positive balance means the store owes the supplier.
+  /v1/settlements/customer-receipts:
+    post:
+      security:
+      - keycloakOIDC: []
+      parameters:
+      - in: header
+        name: Idempotency-Key
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Settlement'
+      responses:
+        '201':
+          description: Customer receipt posted and AR reduced
+        '409':
+          description: amount exceeds outstanding balance or business conflict
+  /v1/settlements/supplier-payments:
+    post:
+      security:
+      - keycloakOIDC: []
+      parameters:
+      - in: header
+        name: Idempotency-Key
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Settlement'
+      responses:
+        '201':
+          description: Supplier payment posted and AP reduced
+  /v1/returns/sales:
+    post:
+      security:
+      - keycloakOIDC: []
+      parameters:
+      - in: header
+        name: Idempotency-Key
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReturnCreate'
+      responses:
+        '201':
+          description: Sale return posted; inventory
+          revenue: null
+          COGS and customer balance/refund updated atomically: null
+  /v1/returns/purchases:
+    post:
+      security:
+      - keycloakOIDC: []
+      parameters:
+      - in: header
+        name: Idempotency-Key
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReturnCreate'
+      responses:
+        '201':
+          description: Purchase return posted; inventory and supplier balance/refund updated atomically
+  /v1/inventory:
+    get:
+      security:
+      - keycloakOIDC: []
+      responses:
+        '200':
+          description: inventory including average cost and low-stock state
+  /v1/inventory/reorder-point:
+    put:
+      security:
+      - keycloakOIDC: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReorderPoint'
+      responses:
+        '200':
+          description: reorder point saved
+  /v1/inventory/adjustments:
+    post:
+      security:
+      - keycloakOIDC: []
+      parameters:
+      - in: header
+        name: Idempotency-Key
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InventoryAdjustment'
+      responses:
+        '201':
+          description: inventory adjustment posted
+  /v1/network/search:
+    get:
+      description: Public cross-store search. Returns only stores and offers explicitly published to the network.
+      parameters:
+      - in: query
+        name: q
+        required: true
+        schema:
+          type: string
+          minLength: 2
+      - in: query
+        name: lat
+        schema:
+          type: number
+          minimum: -90
+          maximum: 90
+      - in: query
+        name: lng
+        schema:
+          type: number
+          minimum: -180
+          maximum: 180
+      - in: query
+        name: sort
+        schema:
+          type: string
+          enum:
+          - best
+          - price
+          - distance
+          - fresh
+      - in: query
+        name: limit
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+      responses:
+        '200':
+          description: Published offers with availability
+          price: null
+          freshness and optional distance: null
+  /v1/network/store-profile:
+    get:
+      security:
+      - keycloakOIDC: []
+      responses:
+        '200':
+          description: Public network profile of the authenticated store
+    put:
+      security:
+      - keycloakOIDC: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NetworkStoreProfileUpdate'
+      responses:
+        '200':
+          description: Store network profile updated
+  /v1/network/offers:
+    get:
+      security:
+      - keycloakOIDC: []
+      parameters:
+      - in: query
+        name: warehouse_id
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: Inventory rows with network publishing state
+  /v1/network/offers/{product_id}:
+    put:
+      security:
+      - keycloakOIDC: []
+      parameters:
+      - in: path
+        name: product_id
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NetworkOfferUpdate'
+      responses:
+        '200':
+          description: Network offer upserted and freshness confirmed
+  /v1/network/reservations:
+    post:
+      description: Create an inventory-backed reservation. mechanic/consumer only. Reserved stock is immediately removed from
+        public availability.
+      security:
+      - keycloakOIDC: []
+      parameters:
+      - in: header
+        name: Idempotency-Key
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NetworkReservationCreate'
+      responses:
+        '201':
+          description: Reservation created
+        '409':
+          description: Offer not reservable or stock conflict
+    get:
+      description: List reservations received by the authenticated store.
+      security:
+      - keycloakOIDC: []
+      parameters:
+      - in: query
+        name: status
+        schema:
+          type: string
+          enum:
+          - all
+          - pending
+          - accepted
+          - ready
+          - rejected
+          - cancelled
+          - expired
+      responses:
+        '200':
+          description: Store reservation list
+  /v1/network/reservations/{id}:
+    patch:
+      description: 'Store-side transition: pending->accepted, accepted->ready, or pending/accepted->rejected.'
+      security:
+      - keycloakOIDC: []
+      parameters:
+      - in: path
+        name: id
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NetworkReservationStatusUpdate'
+      responses:
+        '200':
+          description: Reservation status changed
+        '409':
+          description: Invalid transition or ownership conflict
+  /v1/me/reservations:
+    get:
+      description: List reservations of the authenticated mechanic/consumer.
+      security:
+      - keycloakOIDC: []
+      responses:
+        '200':
+          description: Buyer reservation list
+  /v1/me/reservations/{id}/cancel:
+    post:
+      description: Cancel buyer-owned reservation while pending/accepted/ready and release reserved inventory.
+      security:
+      - keycloakOIDC: []
+      parameters:
+      - in: path
+        name: id
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: Reservation cancelled
+        '409':
+          description: Reservation cannot be cancelled
