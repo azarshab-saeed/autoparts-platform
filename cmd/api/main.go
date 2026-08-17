@@ -43,7 +43,7 @@ var (
 	buildTime = "unknown"
 )
 
-const latestMigration = "012_production_hardening.sql"
+const latestMigration = "013_adoption_imports.sql"
 
 func main() {
 	log.SetFlags(0)
@@ -167,6 +167,39 @@ func main() {
 		out, err := catalogSvc.Create(r.Context(), c.TenantID, in)
 		if err != nil {
 			api.WriteError(w, api.Conflict("product_create_failed", err.Error()))
+			return
+		}
+		api.WriteJSON(w, http.StatusCreated, out)
+	})))
+
+	protected.Handle("POST /v1/products/import", auth.RequireRoles("owner", "admin", "warehouse")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, _ := auth.ClaimsFrom(r.Context())
+		key := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
+		if key == "" {
+			api.WriteError(w, api.BadRequest("missing_idempotency_key", "Idempotency-Key header is required"))
+			return
+		}
+		var in struct {
+			WarehouseID uuid.UUID           `json:"warehouse_id"`
+			Rows        []catalog.ImportRow `json:"rows"`
+		}
+		if err := decodeJSON(r, &in); err != nil {
+			api.WriteError(w, err)
+			return
+		}
+		out, err := catalogSvc.Import(r.Context(), catalog.ImportCommand{
+			TenantID: c.TenantID, StoreID: c.StoreID, WarehouseID: in.WarehouseID, ActorUserID: c.UserID,
+			IdempotencyKey: key, Rows: in.Rows,
+		})
+		if err != nil {
+			var validationErr *catalog.ImportValidationError
+			if errors.As(err, &validationErr) {
+				api.WriteJSON(w, http.StatusBadRequest, map[string]any{
+					"error": map[string]any{"code": "import_validation_failed", "message": validationErr.Error(), "rows": validationErr.Rows},
+				})
+				return
+			}
+			api.WriteError(w, api.Conflict("catalog_import_failed", err.Error()))
 			return
 		}
 		api.WriteJSON(w, http.StatusCreated, out)

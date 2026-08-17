@@ -71,4 +71,19 @@ assert_zero "sale item tenant consistency" \
 assert_zero "purchase item tenant consistency" \
   "SELECT count(*) FROM purchase_items i JOIN purchases p ON p.id=i.purchase_id WHERE i.tenant_id <> p.tenant_id;"
 
+assert_zero "catalog import row reconciliation" \
+  "SELECT count(*) FROM catalog_import_batches b WHERE b.row_count <> (SELECT count(*) FROM catalog_import_row_results r WHERE r.batch_id=b.id);"
+
+assert_zero "catalog import batch totals" \
+  "SELECT count(*) FROM catalog_import_batches b WHERE b.created_count + b.updated_count <> b.row_count OR b.inventory_initialized_count + b.inventory_preserved_count <> b.row_count OR b.offers_upserted_count > b.row_count;"
+
+assert_zero "catalog import movement trace" \
+  "SELECT count(*) FROM inventory_movements m WHERE m.reference_type='catalog_import' AND NOT EXISTS (SELECT 1 FROM catalog_import_batches b WHERE b.id=m.reference_id AND b.tenant_id=m.tenant_id);"
+
+assert_zero "catalog import opening value" \
+  "SELECT count(*) FROM catalog_import_batches b WHERE b.opening_inventory_value <> COALESCE((SELECT SUM(m.cost_delta)::bigint FROM inventory_movements m WHERE m.tenant_id=b.tenant_id AND m.reference_type='catalog_import' AND m.reference_id=b.id),0);"
+
+assert_zero "catalog import opening journal" \
+  "SELECT count(*) FROM catalog_import_batches b WHERE b.opening_inventory_value > 0 AND NOT EXISTS (SELECT 1 FROM journals j JOIN journal_entries e ON e.journal_id=j.id AND e.tenant_id=j.tenant_id WHERE j.tenant_id=b.tenant_id AND j.reference_type='catalog_import' AND j.reference_id=b.id GROUP BY j.id HAVING SUM(e.debit)=b.opening_inventory_value AND SUM(e.credit)=b.opening_inventory_value);"
+
 printf '%s\n' 'PASS all database invariants'

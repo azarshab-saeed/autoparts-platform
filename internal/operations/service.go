@@ -153,6 +153,35 @@ func (s *Service) Dashboard(ctx context.Context, tenantID, storeID uuid.UUID, no
 	if err := s.db.QueryRow(ctx, `SELECT COUNT(*)::int FROM inventory_balances ib JOIN warehouses w ON w.id=ib.warehouse_id AND w.tenant_id=ib.tenant_id LEFT JOIN inventory_reorder_points rp ON rp.tenant_id=ib.tenant_id AND rp.warehouse_id=ib.warehouse_id AND rp.product_id=ib.product_id WHERE ib.tenant_id=$1 AND w.store_id=$2 AND COALESCE(rp.min_qty,0)>0 AND (ib.on_hand-ib.reserved)<=rp.min_qty`, tenantID, storeID).Scan(&out.LowStockCount); err != nil {
 		return out, err
 	}
+	if err := s.db.QueryRow(ctx, `SELECT network_enabled FROM stores WHERE tenant_id=$1 AND id=$2`, tenantID, storeID).Scan(&out.NetworkEnabled); err != nil {
+		return out, err
+	}
+	if err := s.db.QueryRow(ctx, `SELECT COUNT(*)::int FROM store_product_offers WHERE tenant_id=$1 AND store_id=$2 AND visible`, tenantID, storeID).Scan(&out.PublishedOffers); err != nil {
+		return out, err
+	}
+	if err := s.db.QueryRow(ctx, `SELECT COUNT(*)::int FROM network_procurements WHERE buyer_tenant_id=$1 AND buyer_store_id=$2 AND status IN ('requested','accepted','ready')`, tenantID, storeID).Scan(&out.OpenBuyingProcurements); err != nil {
+		return out, err
+	}
+	if err := s.db.QueryRow(ctx, `SELECT COUNT(*)::int FROM network_procurements WHERE seller_tenant_id=$1 AND seller_store_id=$2 AND status IN ('requested','accepted','ready')`, tenantID, storeID).Scan(&out.OpenSellingProcurements); err != nil {
+		return out, err
+	}
+	networkStart := day.AddDate(0, 0, -29)
+	if err := s.db.QueryRow(ctx, `
+		SELECT
+		  (SELECT COUNT(*)::int FROM network_reservations WHERE tenant_id=$1 AND store_id=$2 AND created_at >= $3) +
+		  (SELECT COUNT(*)::int FROM network_procurements WHERE seller_tenant_id=$1 AND seller_store_id=$2 AND created_at >= $3)`, tenantID, storeID, networkStart).Scan(&out.NetworkRequests30d); err != nil {
+		return out, err
+	}
+	if err := s.db.QueryRow(ctx, `
+		SELECT COALESCE(SUM(s.total_amount),0)::bigint,COUNT(*)::int
+		FROM sales s
+		WHERE s.tenant_id=$1 AND s.store_id=$2 AND s.status='posted' AND s.created_at >= $3
+		  AND (
+		    EXISTS(SELECT 1 FROM network_reservations nr WHERE nr.tenant_id=s.tenant_id AND nr.store_id=s.store_id AND nr.sale_id=s.id)
+		    OR EXISTS(SELECT 1 FROM network_procurements np WHERE np.seller_tenant_id=s.tenant_id AND np.seller_store_id=s.store_id AND np.seller_sale_id=s.id)
+		  )`, tenantID, storeID, networkStart).Scan(&out.NetworkSales30d, &out.NetworkSalesCount30d); err != nil {
+		return out, err
+	}
 	rows, err := s.db.Query(ctx, `SELECT s.id,s.customer_id,COALESCE(c.name,''),s.total_amount,s.paid_amount,s.due_amount,s.status,s.created_at,(SELECT COUNT(*)::int FROM sale_items si WHERE si.tenant_id=s.tenant_id AND si.sale_id=s.id),COALESCE((SELECT SUM(si.qty)::float8 FROM sale_items si WHERE si.tenant_id=s.tenant_id AND si.sale_id=s.id),0),(EXISTS(SELECT 1 FROM network_reservations nr WHERE nr.sale_id=s.id AND nr.tenant_id=s.tenant_id) OR EXISTS(SELECT 1 FROM network_procurements np WHERE np.seller_sale_id=s.id AND np.seller_tenant_id=s.tenant_id)) FROM sales s LEFT JOIN customers c ON c.id=s.customer_id AND c.tenant_id=s.tenant_id WHERE s.tenant_id=$1 AND s.store_id=$2 ORDER BY s.created_at DESC LIMIT 5`, tenantID, storeID)
 	if err != nil {
 		return out, err

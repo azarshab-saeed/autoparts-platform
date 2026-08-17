@@ -15,7 +15,7 @@ import type {
   SaleItem,
   SettlementResult,
   Supplier,
-  UserSession, NetworkSearchResult, NetworkStoreOffer, StoreNetworkProfile, NetworkReservation, NetworkReservationStatus, ReservationFulfillmentResult, Expense, ExpenseCategory, PartyStatement, ProfitLoss, CashReport, DailyClosing, DashboardSummary, InventoryInsightReport, PagedResult, PurchaseHistoryItem, SaleHistoryItem, NetworkProcurement, ProcurementReceiveResult, VehicleMake, ProductSearchMetadata, ProductSearchTerm, ProductFitmentInput, AuditLogEntry
+  UserSession, NetworkSearchResult, NetworkStoreOffer, StoreNetworkProfile, NetworkReservation, NetworkReservationStatus, ReservationFulfillmentResult, Expense, ExpenseCategory, PartyStatement, ProfitLoss, CashReport, DailyClosing, DashboardSummary, InventoryInsightReport, PagedResult, PurchaseHistoryItem, SaleHistoryItem, NetworkProcurement, ProcurementReceiveResult, VehicleMake, ProductSearchMetadata, ProductSearchTerm, ProductFitmentInput, AuditLogEntry, ProductImportRow, ProductImportResult
 } from "./types";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
@@ -42,6 +42,24 @@ export async function searchProducts(q: string, session: UserSession): Promise<P
   }
   const out = await request<{items: Product[]}>(`/v1/products?q=${encodeURIComponent(q)}&limit=30`, {}, session.token);
   return out.items;
+}
+
+export async function importProducts(session: UserSession, rows: ProductImportRow[]): Promise<ProductImportResult> {
+  if (MOCK_MODE) {
+    await new Promise(r => setTimeout(r, 500));
+    return {
+      batch_id: crypto.randomUUID(), row_count: rows.length, created_count: rows.length, updated_count: 0,
+      inventory_initialized_count: rows.length, inventory_preserved_count: 0,
+      offers_upserted_count: rows.filter(x => x.selling_price > 0).length,
+      opening_inventory_value: rows.reduce((sum,x)=>sum+x.on_hand*x.avg_unit_cost,0),
+      rows: rows.map(x=>({row_number:x.row_number,product_id:crypto.randomUUID(),product_action:"created" as const,inventory_action:"initialized" as const,offer_action:x.selling_price>0?"upserted" as const:"none" as const}))
+    };
+  }
+  return request<ProductImportResult>("/v1/products/import", {
+    method: "POST",
+    headers: { "Idempotency-Key": crypto.randomUUID() },
+    body: JSON.stringify({ warehouse_id: session.warehouseId, rows })
+  }, session.token);
 }
 
 export async function searchCustomers(q: string, session: UserSession): Promise<Customer[]> {

@@ -35,18 +35,25 @@ type DailyAmount struct {
 }
 
 type DashboardSummary struct {
-	SalesToday         int64          `json:"sales_today"`
-	SalesReturnsToday  int64          `json:"sales_returns_today"`
-	NetSalesToday      int64          `json:"net_sales_today"`
-	GrossProfitToday   int64          `json:"gross_profit_today"`
-	PurchasesToday     int64          `json:"purchases_today"`
-	Receivables        int64          `json:"receivables"`
-	Payables           int64          `json:"payables"`
-	InventoryValue     int64          `json:"inventory_value"`
-	OpenReservations   int            `json:"open_reservations"`
-	LowStockCount      int            `json:"low_stock_count"`
-	RecentSales        []SaleListItem `json:"recent_sales"`
-	SalesLastSevenDays []DailyAmount  `json:"sales_last_seven_days"`
+	SalesToday              int64          `json:"sales_today"`
+	SalesReturnsToday       int64          `json:"sales_returns_today"`
+	NetSalesToday           int64          `json:"net_sales_today"`
+	GrossProfitToday        int64          `json:"gross_profit_today"`
+	PurchasesToday          int64          `json:"purchases_today"`
+	Receivables             int64          `json:"receivables"`
+	Payables                int64          `json:"payables"`
+	InventoryValue          int64          `json:"inventory_value"`
+	OpenReservations        int            `json:"open_reservations"`
+	LowStockCount           int            `json:"low_stock_count"`
+	OpenBuyingProcurements  int            `json:"open_buying_procurements"`
+	OpenSellingProcurements int            `json:"open_selling_procurements"`
+	NetworkEnabled          bool           `json:"network_enabled"`
+	PublishedOffers         int            `json:"published_offers"`
+	NetworkRequests30d      int            `json:"network_requests_30d"`
+	NetworkSalesCount30d    int            `json:"network_sales_count_30d"`
+	NetworkSales30d         int64          `json:"network_sales_30d"`
+	RecentSales             []SaleListItem `json:"recent_sales"`
+	SalesLastSevenDays      []DailyAmount  `json:"sales_last_seven_days"`
 }
 
 type InventoryInsightItem struct {

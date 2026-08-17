@@ -1,8 +1,8 @@
 openapi: 3.1.0
 info:
   title: Auto Parts Platform API
-  version: 0.14.0
-  description: Phase 14 contract. Adds production health/readiness/version endpoints, audit logging, request IDs, rate limiting, security hardening and deployment operations while preserving Phase 13 vehicle fitment search. Monetary integer fields use Iranian toman (application currency code IRT).
+  version: 0.15.6
+  description: Phase 15.6 adoption contract. Adds safe catalog/inventory CSV import and store network-value dashboard metrics while preserving the RC1 operational and security contract. Monetary integer fields use Iranian toman (application currency code IRT).
 servers:
 - url: http://localhost:8080
 components:
@@ -225,6 +225,45 @@ components:
         target_qty:
           type: number
           minimum: 0
+    ProductImportRow:
+      type: object
+      required: [row_number, title, on_hand, avg_unit_cost, selling_price, visible, allow_reservation, allow_procurement]
+      properties:
+        row_number: {type: integer, minimum: 1}
+        sku: {type: string}
+        title: {type: string, minLength: 1, maxLength: 300}
+        brand: {type: string}
+        oem_code: {type: string}
+        barcode: {type: string}
+        unit: {type: string, default: pcs}
+        on_hand: {type: number, minimum: 0}
+        avg_unit_cost: {type: integer, minimum: 0, description: Opening weighted-average cost in toman. Required to be positive when on_hand is positive.}
+        selling_price: {type: integer, minimum: 0, description: Zero means do not create/update a network offer.}
+        visible: {type: boolean}
+        allow_reservation: {type: boolean}
+        allow_procurement: {type: boolean}
+    ProductImportRequest:
+      type: object
+      required: [warehouse_id, rows]
+      properties:
+        warehouse_id: {type: string, format: uuid}
+        rows:
+          type: array
+          minItems: 1
+          maxItems: 2000
+          items: {$ref: '#/components/schemas/ProductImportRow'}
+    ProductImportResult:
+      type: object
+      properties:
+        batch_id: {type: string, format: uuid}
+        row_count: {type: integer}
+        created_count: {type: integer}
+        updated_count: {type: integer}
+        inventory_initialized_count: {type: integer}
+        inventory_preserved_count: {type: integer}
+        offers_upserted_count: {type: integer}
+        opening_inventory_value: {type: integer}
+        rows: {type: array, items: {type: object}}
     ProductSearchTerm:
       type: object
       required: [kind, term]
@@ -605,6 +644,13 @@ components:
         inventory_value: {type: integer}
         open_reservations: {type: integer}
         low_stock_count: {type: integer}
+        open_buying_procurements: {type: integer}
+        open_selling_procurements: {type: integer}
+        network_enabled: {type: boolean}
+        published_offers: {type: integer}
+        network_requests_30d: {type: integer}
+        network_sales_count_30d: {type: integer}
+        network_sales_30d: {type: integer}
         recent_sales: {type: array, items: {$ref: '#/components/schemas/SaleHistoryItem'}}
         sales_last_seven_days:
           type: array
@@ -705,6 +751,25 @@ paths:
       responses:
         '201':
           description: product created
+  /v1/products/import:
+    post:
+      description: Idempotent store catalog migration endpoint. Creates/updates products, initializes only untouched inventory balances, posts opening inventory accounting, and optionally upserts network offers. Existing live inventory is preserved.
+      security: [{keycloakOIDC: []}]
+      parameters:
+      - {in: header, name: Idempotency-Key, required: true, schema: {type: string}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ProductImportRequest'}
+      responses:
+        '201':
+          description: Import completed or replayed idempotently
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ProductImportResult'}
+        '400': {description: Row validation failed}
+        '409': {description: Import could not be applied safely}
   /v1/products/{product_id}/search-metadata:
     get:
       description: Returns tenant-owned aliases, alternate OEM/equivalent codes, and vehicle fitments for a product.
@@ -1385,7 +1450,7 @@ paths:
         '404': {description: Supplier not found in authenticated store}
   /v1/dashboard:
     get:
-      description: Live store management dashboard with today's operations, balances, inventory value, open reservations, recent sales and a seven-day sales series.
+      description: Live store management dashboard with operations, action-center counts, network revenue/request metrics, balances, inventory value, recent sales and a seven-day sales series.
       security:
       - keycloakOIDC: []
       responses:

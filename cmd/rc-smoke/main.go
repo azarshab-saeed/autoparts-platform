@@ -117,6 +117,9 @@ func (r *runner) run() error {
 		return nil
 	}
 
+	if err := r.checkCatalogImport(ownerToken); err != nil {
+		return err
+	}
 	if err := r.checkInventoryIdempotency(ownerToken); err != nil {
 		return err
 	}
@@ -243,6 +246,40 @@ func pickParsOffer(items []searchItem) (searchItem, error) {
 		}
 	}
 	return searchItem{}, errors.New("pars offer with reservation/procurement availability not found")
+}
+
+func (r *runner) checkCatalogImport(token string) error {
+	const key = "rc15-6-import-v1"
+	payload := map[string]any{
+		"warehouse_id": ownerWarehouseID,
+		"rows": []map[string]any{{
+			"row_number": 2, "sku": "RC-IMPORT-001", "title": "کالای تست ورود RC", "brand": "RC",
+			"on_hand": 1, "avg_unit_cost": 1000, "selling_price": 1500,
+			"visible": false, "allow_reservation": true, "allow_procurement": true,
+		}},
+	}
+	status, first, err := r.do(http.MethodPost, r.cfg.apiURL+"/v1/products/import", token, payload, key)
+	if err != nil || status != http.StatusCreated {
+		return r.fail("catalog import first write", fmt.Errorf("status=%d err=%v body=%s", status, err, first))
+	}
+	var a struct {
+		BatchID string `json:"batch_id"`
+	}
+	if err := json.Unmarshal(first, &a); err != nil || a.BatchID == "" {
+		return r.fail("catalog import first write", fmt.Errorf("invalid response: %s", first))
+	}
+	status, second, err := r.do(http.MethodPost, r.cfg.apiURL+"/v1/products/import", token, payload, key)
+	if err != nil || status != http.StatusCreated {
+		return r.fail("catalog import replay", fmt.Errorf("status=%d err=%v body=%s", status, err, second))
+	}
+	var b struct {
+		BatchID string `json:"batch_id"`
+	}
+	if err := json.Unmarshal(second, &b); err != nil || b.BatchID != a.BatchID {
+		return r.fail("catalog import replay", fmt.Errorf("idempotency mismatch first=%s second=%s", a.BatchID, b.BatchID))
+	}
+	r.pass("catalog import idempotency + opening inventory")
+	return nil
 }
 
 func (r *runner) checkInventoryIdempotency(token string) error {

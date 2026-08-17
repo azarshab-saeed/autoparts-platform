@@ -35,6 +35,34 @@ export type Product = {
   mockUnitCost?: number;
 };
 
+export type ProductImportRow = {
+  row_number: number;
+  sku?: string;
+  title: string;
+  brand?: string;
+  oem_code?: string;
+  barcode?: string;
+  unit?: string;
+  on_hand: number;
+  avg_unit_cost: number;
+  selling_price: number;
+  visible: boolean;
+  allow_reservation: boolean;
+  allow_procurement: boolean;
+};
+
+export type ProductImportResult = {
+  batch_id: string;
+  row_count: number;
+  created_count: number;
+  updated_count: number;
+  inventory_initialized_count: number;
+  inventory_preserved_count: number;
+  offers_upserted_count: number;
+  opening_inventory_value: number;
+  rows: { row_number: number; product_id: string; product_action: "created"|"updated"; inventory_action: "initialized"|"preserved"|"none"; offer_action: "upserted"|"none"; note?: string }[];
+};
+
 export type Customer = { id: string; name: string; phone?: string; code?: string };
 export type Supplier = { id: string; name: string; phone?: string; code?: string; notes?: string };
 
@@ -310,6 +338,13 @@ export type DashboardSummary = {
   inventory_value: number;
   open_reservations: number;
   low_stock_count: number;
+  open_buying_procurements: number;
+  open_selling_procurements: number;
+  network_enabled: boolean;
+  published_offers: number;
+  network_requests_30d: number;
+  network_sales_count_30d: number;
+  network_sales_30d: number;
   recent_sales: SaleHistoryItem[];
   sales_last_seven_days: DashboardDailyAmount[];
 };

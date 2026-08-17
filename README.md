@@ -200,3 +200,7 @@ Phase 13 adds vehicle make/model/variant fitment, alternate OEM/equivalent searc
 ## Phase 14 — Production Readiness & Security Hardening
 
 Phase 14 adds liveness/readiness/version endpoints, structured JSON HTTP logging, request IDs, strict CORS and security headers, rate limiting, panic recovery, graceful shutdown and a tenant-scoped audit trail for mutating requests. A separate `docker-compose.prod.yml` disables demo seeding and dev-user reconciliation, bootstraps only production-safe Keycloak realm/client configuration, binds application ports to loopback for a TLS reverse proxy, and includes deployment preflight plus PostgreSQL backup/restore tooling. See `docs/ops/PRODUCTION_RUNBOOK.md`.
+
+## Phase 15.6 — Adoption UX
+
+Phase 15.6 adds a network-value dashboard, action center, safe CSV migration/import flow, and saved-vehicle/recent-search UX for mechanic users. The import flow initializes only untouched opening inventory and preserves balances that already have operational history. See `PHASE_15_6_RUN.md`.

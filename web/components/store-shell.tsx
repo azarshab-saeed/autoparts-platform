@@ -20,6 +20,7 @@ const nav: NavItem[] = [
   {href:"/store/sales",label:"فروش",icon:CartIcon,group:"عملیات",mobile:true},
   {href:"/store/purchases",label:"خرید",icon:BoxIcon,group:"عملیات"},
   {href:"/store/inventory",label:"انبار و کالاها",icon:BoxIcon,group:"عملیات",mobile:true},
+  {href:"/store/import",label:"ورود اطلاعات",icon:BoxIcon,group:"عملیات",roles:["owner","admin","warehouse"]},
   {href:"/store/network",label:"شبکه قطعات",icon:SearchIcon,group:"شبکه"},
   {href:"/store/procurement",label:"تأمین از شبکه",icon:BoxIcon,group:"شبکه",mobile:true},
   {href:"/store/orders",label:"سفارش‌های شبکه",icon:CartIcon,group:"شبکه",mobile:true},
