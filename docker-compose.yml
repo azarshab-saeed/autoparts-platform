@@ -54,6 +54,22 @@ services:
       db-prepare:
         condition: service_completed_successfully
 
+  keycloak-sync:
+    image: ${KEYCLOAK_IMAGE:-keycloak/keycloak:26.7.0}
+    entrypoint: ["/bin/sh", "/opt/keycloak/sync-dev.sh"]
+    environment:
+      KEYCLOAK_SYNC_SERVER: http://keycloak:8080
+      KEYCLOAK_REALM: autoparts
+      KEYCLOAK_ADMIN_USERNAME: ${KEYCLOAK_ADMIN_USERNAME:-admin}
+      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin-change-me}
+      KEYCLOAK_DEV_PASSWORD: ${KEYCLOAK_DEV_PASSWORD:-ChangeMe123!}
+    volumes:
+      - ./keycloak/sync-dev.sh:/opt/keycloak/sync-dev.sh:ro
+    depends_on:
+      keycloak:
+        condition: service_started
+    restart: "no"
+
   api:
     build:
       context: .
@@ -75,8 +91,8 @@ services:
         condition: service_healthy
       db-prepare:
         condition: service_completed_successfully
-      keycloak:
-        condition: service_started
+      keycloak-sync:
+        condition: service_completed_successfully
 
   web:
     build:

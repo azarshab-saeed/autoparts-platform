@@ -23,9 +23,12 @@ export default function LoginPage() {
       {!ready ? <div className="loading-auth">در حال آماده‌سازی ورود...</div> :
         <button className="keycloak-login" onClick={() => void login()}>ورود امن به پنل</button>}
       {showDev && !MOCK_MODE && <div className="dev-credentials">
-        <b>کاربر نمونه توسعه</b>
-        <code>فروشگاه: owner@example.com / ChangeMe123!</code>
+        <b>کاربران نمونه توسعه</b>
+        <code>یدکی رضایی: owner@example.com / ChangeMe123!</code>
+        <code>یدکی مرکزی: central@example.com / ChangeMe123!</code>
+        <code>پارس یدک: pars@example.com / ChangeMe123!</code>
         <code>مکانیک: mechanic@example.com / ChangeMe123!</code>
+        <code>مصرف‌کننده: consumer@example.com / ChangeMe123!</code>
       </div>}
       <small className="login-security-note">رمز عبور داخل اپلیکیشن فروشگاه دریافت یا ذخیره نمی‌شود.</small>
       <a className="mechanic-entry-link" href="/mechanic">جست‌وجوی قطعه برای مکانیک‌ها ←</a>
