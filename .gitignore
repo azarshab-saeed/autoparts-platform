@@ -3,3 +3,5 @@
 backups/
 *.dump
 *.dump.sha256
+dist/
+bin/

@@ -431,3 +431,14 @@ export type AuditLogEntry = {
   remote_ip: string;
   metadata?: Record<string, unknown>;
 };
+
+export type EdgePairing = { pair_code: string; expires_at: string };
+export type EdgeDevice = {
+  id: string;
+  store_id: string;
+  warehouse_id: string;
+  name: string;
+  active: boolean;
+  last_seen_at?: string;
+  created_at: string;
+};

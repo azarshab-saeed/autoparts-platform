@@ -19,6 +19,15 @@ type Service struct{ db *pgxpool.Pool }
 func NewService(db *pgxpool.Pool) *Service { return &Service{db: db} }
 
 func (s *Service) Create(ctx context.Context, cmd CreateSaleCommand) (Sale, error) {
+	if strings.TrimSpace(cmd.Source) == "" {
+		cmd.Source = "web"
+	}
+	if cmd.Source != "web" && cmd.Source != "edge" {
+		return Sale{}, errors.New("sale source must be web or edge")
+	}
+	if cmd.Source == "edge" && (cmd.EdgeDeviceID == nil || *cmd.EdgeDeviceID == uuid.Nil || strings.TrimSpace(cmd.EdgeLocalOperationID) == "") {
+		return Sale{}, errors.New("edge sale requires device and local operation id")
+	}
 	if len(cmd.Items) == 0 {
 		return Sale{}, errors.New("sale requires at least one item")
 	}
@@ -78,7 +87,7 @@ func (s *Service) Create(ctx context.Context, cmd CreateSaleCommand) (Sale, erro
 	}
 
 	saleID := uuid.New()
-	_, err = tx.Exec(ctx, `INSERT INTO sales(id,tenant_id,store_id,warehouse_id,customer_id,status,total_amount,paid_amount,due_amount,idempotency_key) VALUES($1,$2,$3,$4,$5,'posted',$6,$7,$8,$9)`, saleID, cmd.TenantID, cmd.StoreID, cmd.WarehouseID, cmd.CustomerID, total, paid, due, cmd.IdempotencyKey)
+	_, err = tx.Exec(ctx, `INSERT INTO sales(id,tenant_id,store_id,warehouse_id,customer_id,status,total_amount,paid_amount,due_amount,idempotency_key,source,edge_device_id,edge_local_operation_id,edge_occurred_at) VALUES($1,$2,$3,$4,$5,'posted',$6,$7,$8,$9,$10,$11,$12,$13)`, saleID, cmd.TenantID, cmd.StoreID, cmd.WarehouseID, cmd.CustomerID, total, paid, due, cmd.IdempotencyKey, cmd.Source, cmd.EdgeDeviceID, strings.TrimSpace(cmd.EdgeLocalOperationID), cmd.EdgeOccurredAt)
 	if err != nil {
 		return Sale{}, err
 	}

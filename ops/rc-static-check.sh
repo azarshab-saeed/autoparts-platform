@@ -27,4 +27,8 @@ grep -Fq 'APP_VERSION:-0.15.0-rc.1' docker-compose.prod.yml || fail 'production 
 grep -Fq 'SEED_DEMO_DATA: "false"' docker-compose.prod.yml || fail 'production demo seed must stay disabled'
 grep -Fq 'NEXT_PUBLIC_SHOW_DEV_CREDENTIALS: "false"' docker-compose.prod.yml || fail 'production dev credentials must stay hidden'
 
+grep -Fq '127.0.0.1:17624' internal/storeedge/store.go || fail 'Store Edge must bind loopback by default'
+grep -Fq 'offline sales support cash or card only' cmd/api/main.go || fail 'offline payment safety guard is missing'
+grep -Fq '014_store_edge_offline.sql' cmd/api/main.go || fail 'API readiness is not pinned to Store Edge migration'
+
 printf '%s\n' 'PASS RC static safety checks'

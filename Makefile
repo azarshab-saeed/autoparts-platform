@@ -1,4 +1,4 @@
-.PHONY: rc-static-check deps fmt test build run compose-up compose-rebuild compose-down web-dev web-build auth-logs migrations prod-preflight prod-up prod-down backup rc-smoke rc-db-check rc-load rc-check
+.PHONY: rc-static-check deps fmt test build run compose-up compose-rebuild compose-down web-dev web-build auth-logs migrations prod-preflight prod-up prod-down backup rc-smoke rc-db-check rc-load rc-check edge-run edge-test edge-build edge-build-windows
 
 deps:
 	go mod tidy
@@ -65,3 +65,15 @@ rc-load:
 
 rc-check:
 	./ops/rc-check.sh
+
+edge-run:
+	go run ./cmd/store-edge
+
+edge-test:
+	go test ./internal/storeedge
+
+edge-build:
+	CGO_ENABLED=0 go build -trimpath -o bin/store-edge ./cmd/store-edge
+
+edge-build-windows:
+	powershell -ExecutionPolicy Bypass -File edge/windows/build.ps1

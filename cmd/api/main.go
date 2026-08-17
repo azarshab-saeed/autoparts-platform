@@ -16,6 +16,7 @@ import (
 
 	"github.com/example/autoparts-core/internal/catalog"
 	"github.com/example/autoparts-core/internal/customers"
+	"github.com/example/autoparts-core/internal/edge"
 	"github.com/example/autoparts-core/internal/finance"
 	"github.com/example/autoparts-core/internal/fitment"
 	"github.com/example/autoparts-core/internal/inventory"
@@ -43,7 +44,7 @@ var (
 	buildTime = "unknown"
 )
 
-const latestMigration = "013_adoption_imports.sql"
+const latestMigration = "014_store_edge_offline.sql"
 
 func main() {
 	log.SetFlags(0)
@@ -77,6 +78,7 @@ func main() {
 	reservationSvc := reservations.NewService(pool)
 	operationsSvc := operations.NewService(pool)
 	auditSvc := audit.NewService(pool)
+	edgeSvc := edge.NewService(pool)
 
 	public := http.NewServeMux()
 	protected := http.NewServeMux()
@@ -1035,6 +1037,45 @@ func main() {
 		api.WriteJSON(w, http.StatusCreated, out)
 	})))
 
+	protected.Handle("POST /v1/edge/pairings", auth.RequireRoles("owner", "admin")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, _ := auth.ClaimsFrom(r.Context())
+		var in struct {
+			WarehouseID uuid.UUID `json:"warehouse_id"`
+		}
+		if err := decodeJSON(r, &in); err != nil {
+			api.WriteError(w, err)
+			return
+		}
+		out, err := edgeSvc.CreatePairing(r.Context(), c.TenantID, c.StoreID, in.WarehouseID, c.UserID)
+		if err != nil {
+			api.WriteError(w, api.Conflict("edge_pairing_failed", err.Error()))
+			return
+		}
+		api.WriteJSON(w, http.StatusCreated, out)
+	})))
+	protected.Handle("GET /v1/edge/devices", auth.RequireRoles("owner", "admin")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, _ := auth.ClaimsFrom(r.Context())
+		items, err := edgeSvc.ListDevices(r.Context(), c.TenantID, c.StoreID)
+		if err != nil {
+			api.WriteError(w, api.Conflict("edge_devices_failed", err.Error()))
+			return
+		}
+		api.WriteJSON(w, http.StatusOK, map[string]any{"items": items})
+	})))
+	protected.Handle("POST /v1/edge/devices/{id}/revoke", auth.RequireRoles("owner", "admin")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, _ := auth.ClaimsFrom(r.Context())
+		id, err := uuid.Parse(r.PathValue("id"))
+		if err != nil {
+			api.WriteError(w, api.BadRequest("invalid_edge_device_id", "device id must be a UUID"))
+			return
+		}
+		if err := edgeSvc.Revoke(r.Context(), c.TenantID, c.StoreID, id); err != nil {
+			api.WriteError(w, api.Conflict("edge_revoke_failed", err.Error()))
+			return
+		}
+		api.WriteJSON(w, http.StatusOK, map[string]string{"status": "revoked"})
+	})))
+
 	protected.Handle("GET /v1/audit-logs", auth.RequireRoles("owner", "admin")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		c, _ := auth.ClaimsFrom(r.Context())
 		limit, offset, err := pageParams(r)
@@ -1053,6 +1094,102 @@ func main() {
 	trustProxy := envBool("TRUST_PROXY_HEADERS", false)
 	protectedHandler := auth.Middleware(verifier, audit.Middleware(pool, trustProxy, protected))
 	root := http.NewServeMux()
+	firstAllowedOrigin := func() string {
+		for _, origin := range strings.Split(os.Getenv("ALLOWED_ORIGINS"), ",") {
+			if v := strings.TrimSpace(origin); v != "" {
+				return v
+			}
+		}
+		return "http://localhost:3000"
+	}
+	edgeAuth := func(r *http.Request) (edge.Device, error) {
+		return edgeSvc.Authenticate(r.Context(), r.Header.Get("X-Edge-Device-ID"), r.Header.Get("X-Edge-Secret"))
+	}
+	root.HandleFunc("POST /v1/edge/pair", func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			PairCode   string `json:"pair_code"`
+			DeviceName string `json:"device_name"`
+		}
+		if err := decodeJSON(r, &in); err != nil {
+			api.WriteError(w, err)
+			return
+		}
+		out, err := edgeSvc.PairDevice(r.Context(), in.PairCode, in.DeviceName)
+		if err != nil {
+			api.WriteError(w, api.BadRequest("edge_pair_failed", err.Error()))
+			return
+		}
+		api.WriteJSON(w, http.StatusCreated, map[string]any{"device_id": out.DeviceID, "device_secret": out.DeviceSecret, "store_id": out.StoreID, "warehouse_id": out.WarehouseID, "store_name": out.StoreName, "web_origin": firstAllowedOrigin()})
+	})
+	root.HandleFunc("GET /v1/edge/snapshot", func(w http.ResponseWriter, r *http.Request) {
+		d, err := edgeAuth(r)
+		if err != nil {
+			api.WriteError(w, api.Unauthorized("edge_auth_failed", "edge device credentials are invalid"))
+			return
+		}
+		out, err := edgeSvc.Snapshot(r.Context(), d)
+		if err != nil {
+			api.WriteError(w, api.Conflict("edge_snapshot_failed", err.Error()))
+			return
+		}
+		api.WriteJSON(w, http.StatusOK, out)
+	})
+	root.HandleFunc("POST /v1/edge/heartbeat", func(w http.ResponseWriter, r *http.Request) {
+		if _, err := edgeAuth(r); err != nil {
+			api.WriteError(w, api.Unauthorized("edge_auth_failed", "edge device credentials are invalid"))
+			return
+		}
+		api.WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	})
+	root.HandleFunc("POST /v1/edge/sales", func(w http.ResponseWriter, r *http.Request) {
+		d, err := edgeAuth(r)
+		if err != nil {
+			api.WriteError(w, api.Unauthorized("edge_auth_failed", "edge device credentials are invalid"))
+			return
+		}
+		var in struct {
+			LocalOperationID string    `json:"local_operation_id"`
+			OccurredAt       time.Time `json:"occurred_at"`
+			PaymentMethod    string    `json:"payment_method"`
+			Items            []struct {
+				ProductID uuid.UUID `json:"product_id"`
+				Qty       float64   `json:"qty"`
+				UnitPrice int64     `json:"unit_price"`
+				Title     string    `json:"title,omitempty"`
+			} `json:"items"`
+		}
+		if err := decodeJSON(r, &in); err != nil {
+			api.WriteError(w, err)
+			return
+		}
+		localID := strings.TrimSpace(in.LocalOperationID)
+		if localID == "" || len(localID) > 128 {
+			api.WriteError(w, api.BadRequest("invalid_edge_local_id", "local_operation_id is required"))
+			return
+		}
+		if in.PaymentMethod != "cash" && in.PaymentMethod != "card" {
+			api.WriteError(w, api.BadRequest("offline_payment_not_supported", "offline sales support cash or card only"))
+			return
+		}
+		items := make([]sales.CreateSaleItem, 0, len(in.Items))
+		for _, x := range in.Items {
+			items = append(items, sales.CreateSaleItem{ProductID: x.ProductID, Qty: x.Qty, UnitPrice: x.UnitPrice})
+		}
+		deviceID := d.ID
+		occurred := in.OccurredAt
+		if occurred.IsZero() {
+			occurred = time.Now()
+		}
+		cmd := sales.CreateSaleCommand{TenantID: d.TenantID, StoreID: d.StoreID, WarehouseID: d.WarehouseID, PaymentMethod: in.PaymentMethod, IdempotencyKey: "edge:" + d.ID.String() + ":" + localID, Source: "edge", EdgeDeviceID: &deviceID, EdgeLocalOperationID: localID, EdgeOccurredAt: &occurred, Items: items}
+		out, err := salesSvc.Create(r.Context(), cmd)
+		if err != nil {
+			_ = edgeSvc.RecordSync(r.Context(), d, localID, nil, "conflict", err.Error())
+			api.WriteError(w, api.Conflict("edge_sale_conflict", err.Error()))
+			return
+		}
+		_ = edgeSvc.RecordSync(r.Context(), d, localID, &out.ID, "synced", "")
+		api.WriteJSON(w, http.StatusCreated, out)
+	})
 	root.HandleFunc("GET /v1/vehicles/catalog", func(w http.ResponseWriter, r *http.Request) {
 		out, err := fitmentSvc.Catalog(r.Context())
 		if err != nil {

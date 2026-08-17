@@ -15,11 +15,16 @@ import type {
   SaleItem,
   SettlementResult,
   Supplier,
-  UserSession, NetworkSearchResult, NetworkStoreOffer, StoreNetworkProfile, NetworkReservation, NetworkReservationStatus, ReservationFulfillmentResult, Expense, ExpenseCategory, PartyStatement, ProfitLoss, CashReport, DailyClosing, DashboardSummary, InventoryInsightReport, PagedResult, PurchaseHistoryItem, SaleHistoryItem, NetworkProcurement, ProcurementReceiveResult, VehicleMake, ProductSearchMetadata, ProductSearchTerm, ProductFitmentInput, AuditLogEntry, ProductImportRow, ProductImportResult
+  UserSession, NetworkSearchResult, NetworkStoreOffer, StoreNetworkProfile, NetworkReservation, NetworkReservationStatus, ReservationFulfillmentResult, Expense, ExpenseCategory, PartyStatement, ProfitLoss, CashReport, DailyClosing, DashboardSummary, InventoryInsightReport, PagedResult, PurchaseHistoryItem, SaleHistoryItem, NetworkProcurement, ProcurementReceiveResult, VehicleMake, ProductSearchMetadata, ProductSearchTerm, ProductFitmentInput, AuditLogEntry, ProductImportRow, ProductImportResult, EdgePairing, EdgeDevice
 } from "./types";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
 export const MOCK_MODE = process.env.NEXT_PUBLIC_MOCK_MODE !== "false";
+
+export class ApiError extends Error {
+  status: number;
+  constructor(status:number,message:string){super(message);this.status=status;this.name="ApiError";}
+}
 
 async function request<T>(path: string, init: RequestInit = {}, token?: string): Promise<T> {
   const headers = new Headers(init.headers);
@@ -27,7 +32,7 @@ async function request<T>(path: string, init: RequestInit = {}, token?: string):
   if (token) headers.set("Authorization", `Bearer ${token}`);
   const res = await fetch(`${API_URL}${path}`, { ...init, headers });
   const body = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(body?.error?.message || `HTTP ${res.status}`);
+  if (!res.ok) throw new ApiError(res.status,body?.error?.message || `HTTP ${res.status}`);
   return body as T;
 }
 
@@ -354,4 +359,18 @@ export async function getAuditLogs(session:UserSession, cursor=""):Promise<Paged
   const p=new URLSearchParams({limit:"100"});if(cursor)p.set("cursor",cursor);
   const out=await request<PagedResult<AuditLogEntry>>(`/v1/audit-logs?${p.toString()}`,{},session.token);
   return {...out,items:out.items??[]};
+}
+
+
+export async function createEdgePairing(session:UserSession):Promise<EdgePairing>{
+  if(MOCK_MODE)return{pair_code:"mock-pair-code",expires_at:new Date(Date.now()+10*60*1000).toISOString()};
+  return request<EdgePairing>("/v1/edge/pairings",{method:"POST",body:JSON.stringify({warehouse_id:session.warehouseId})},session.token);
+}
+export async function getEdgeDevices(session:UserSession):Promise<EdgeDevice[]>{
+  if(MOCK_MODE)return[];
+  const out=await request<{items:EdgeDevice[]}>("/v1/edge/devices",{},session.token);return out.items??[];
+}
+export async function revokeEdgeDevice(session:UserSession,id:string):Promise<void>{
+  if(MOCK_MODE)return;
+  await request<{status:string}>(`/v1/edge/devices/${encodeURIComponent(id)}/revoke`,{method:"POST"},session.token);
 }

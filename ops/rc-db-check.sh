@@ -86,4 +86,13 @@ assert_zero "catalog import opening value" \
 assert_zero "catalog import opening journal" \
   "SELECT count(*) FROM catalog_import_batches b WHERE b.opening_inventory_value > 0 AND NOT EXISTS (SELECT 1 FROM journals j JOIN journal_entries e ON e.journal_id=j.id AND e.tenant_id=j.tenant_id WHERE j.tenant_id=b.tenant_id AND j.reference_type='catalog_import' AND j.reference_id=b.id GROUP BY j.id HAVING SUM(e.debit)=b.opening_inventory_value AND SUM(e.credit)=b.opening_inventory_value);"
 
+assert_zero "edge device warehouse scope" \
+  "SELECT count(*) FROM store_edge_devices d JOIN warehouses w ON w.id=d.warehouse_id WHERE d.tenant_id<>w.tenant_id OR d.store_id<>w.store_id;"
+
+assert_zero "edge sale provenance" \
+  "SELECT count(*) FROM sales WHERE source='edge' AND (edge_device_id IS NULL OR NULLIF(edge_local_operation_id,'') IS NULL);"
+
+assert_zero "edge sync event reconciliation" \
+  "SELECT count(*) FROM store_edge_sync_events e WHERE e.status='synced' AND (e.server_reference_id IS NULL OR NOT EXISTS (SELECT 1 FROM sales s WHERE s.id=e.server_reference_id AND s.tenant_id=e.tenant_id AND s.store_id=e.store_id AND s.source='edge' AND s.edge_device_id=e.device_id AND s.edge_local_operation_id=e.local_operation_id));"
+
 printf '%s\n' 'PASS all database invariants'

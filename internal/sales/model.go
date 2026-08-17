@@ -1,6 +1,10 @@
 package sales
 
-import "github.com/google/uuid"
+import (
+	"time"
+
+	"github.com/google/uuid"
+)
 
 type CreateSaleItem struct {
 	ProductID uuid.UUID `json:"product_id"`
@@ -14,14 +18,18 @@ type PaymentPart struct {
 }
 
 type CreateSaleCommand struct {
-	TenantID       uuid.UUID        `json:"-"`
-	StoreID        uuid.UUID        `json:"-"`
-	WarehouseID    uuid.UUID        `json:"warehouse_id"`
-	CustomerID     *uuid.UUID       `json:"customer_id,omitempty"`
-	PaymentMethod  string           `json:"payment_method,omitempty"` // legacy single-method input
-	Payments       []PaymentPart    `json:"payments,omitempty"`
-	IdempotencyKey string           `json:"-"`
-	Items          []CreateSaleItem `json:"items"`
+	TenantID             uuid.UUID        `json:"-"`
+	StoreID              uuid.UUID        `json:"-"`
+	WarehouseID          uuid.UUID        `json:"warehouse_id"`
+	CustomerID           *uuid.UUID       `json:"customer_id,omitempty"`
+	PaymentMethod        string           `json:"payment_method,omitempty"` // legacy single-method input
+	Payments             []PaymentPart    `json:"payments,omitempty"`
+	IdempotencyKey       string           `json:"-"`
+	Source               string           `json:"-"`
+	EdgeDeviceID         *uuid.UUID       `json:"-"`
+	EdgeLocalOperationID string           `json:"-"`
+	EdgeOccurredAt       *time.Time       `json:"-"`
+	Items                []CreateSaleItem `json:"items"`
 }
 
 type Sale struct {

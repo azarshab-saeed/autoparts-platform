@@ -1,0 +1,187 @@
+package edge
+
+import (
+	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"crypto/subtle"
+	"encoding/base64"
+	"encoding/hex"
+	"errors"
+	"strings"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+)
+
+const pairingTTL = 10 * time.Minute
+
+type Service struct{ db *pgxpool.Pool }
+
+func NewService(db *pgxpool.Pool) *Service { return &Service{db: db} }
+
+func (s *Service) CreatePairing(ctx context.Context, tenantID, storeID, warehouseID, userID uuid.UUID) (Pairing, error) {
+	if tenantID == uuid.Nil || storeID == uuid.Nil || warehouseID == uuid.Nil || userID == uuid.Nil {
+		return Pairing{}, errors.New("authenticated store and warehouse are required")
+	}
+	var ok bool
+	if err := s.db.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM warehouses WHERE id=$1 AND tenant_id=$2 AND store_id=$3)`, warehouseID, tenantID, storeID).Scan(&ok); err != nil {
+		return Pairing{}, err
+	}
+	if !ok {
+		return Pairing{}, errors.New("warehouse does not belong to authenticated store")
+	}
+	code, err := randomToken(24)
+	if err != nil {
+		return Pairing{}, err
+	}
+	expires := time.Now().Add(pairingTTL)
+	_, err = s.db.Exec(ctx, `INSERT INTO store_edge_pairings(tenant_id,store_id,warehouse_id,requested_by_user_id,code_hash,expires_at) VALUES($1,$2,$3,$4,$5,$6)`, tenantID, storeID, warehouseID, userID, hashToken(code), expires)
+	if err != nil {
+		return Pairing{}, err
+	}
+	return Pairing{Code: code, ExpiresAt: expires}, nil
+}
+
+func (s *Service) PairDevice(ctx context.Context, code, name string) (PairResult, error) {
+	code = strings.TrimSpace(code)
+	name = strings.TrimSpace(name)
+	if code == "" || name == "" || len(name) > 120 {
+		return PairResult{}, errors.New("pair_code and device_name are required")
+	}
+	tx, err := s.db.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.Serializable})
+	if err != nil {
+		return PairResult{}, err
+	}
+	defer tx.Rollback(ctx)
+	var tenantID, storeID, warehouseID, pairedBy uuid.UUID
+	err = tx.QueryRow(ctx, `SELECT tenant_id,store_id,warehouse_id,requested_by_user_id FROM store_edge_pairings WHERE code_hash=$1 AND consumed_at IS NULL AND expires_at>now() FOR UPDATE`, hashToken(code)).Scan(&tenantID, &storeID, &warehouseID, &pairedBy)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return PairResult{}, errors.New("pair code is invalid, expired, or already used")
+	}
+	if err != nil {
+		return PairResult{}, err
+	}
+	secret, err := randomToken(32)
+	if err != nil {
+		return PairResult{}, err
+	}
+	deviceID := uuid.New()
+	if _, err = tx.Exec(ctx, `INSERT INTO store_edge_devices(id,tenant_id,store_id,warehouse_id,name,secret_hash,paired_by_user_id) VALUES($1,$2,$3,$4,$5,$6,$7)`, deviceID, tenantID, storeID, warehouseID, name, hashToken(secret), pairedBy); err != nil {
+		return PairResult{}, err
+	}
+	if _, err = tx.Exec(ctx, `UPDATE store_edge_pairings SET consumed_at=now() WHERE code_hash=$1`, hashToken(code)); err != nil {
+		return PairResult{}, err
+	}
+	var storeName string
+	if err = tx.QueryRow(ctx, `SELECT name FROM stores WHERE id=$1 AND tenant_id=$2`, storeID, tenantID).Scan(&storeName); err != nil {
+		return PairResult{}, err
+	}
+	if err = tx.Commit(ctx); err != nil {
+		return PairResult{}, err
+	}
+	return PairResult{DeviceID: deviceID, DeviceSecret: secret, StoreID: storeID, WarehouseID: warehouseID, StoreName: storeName}, nil
+}
+
+func (s *Service) Authenticate(ctx context.Context, deviceRaw, secret string) (Device, error) {
+	deviceID, err := uuid.Parse(strings.TrimSpace(deviceRaw))
+	if err != nil || strings.TrimSpace(secret) == "" {
+		return Device{}, errors.New("edge device credentials are invalid")
+	}
+	var d Device
+	var stored string
+	err = s.db.QueryRow(ctx, `SELECT id,tenant_id,store_id,warehouse_id,name,active,last_seen_at,created_at,secret_hash FROM store_edge_devices WHERE id=$1 AND active AND revoked_at IS NULL`, deviceID).
+		Scan(&d.ID, &d.TenantID, &d.StoreID, &d.WarehouseID, &d.Name, &d.Active, &d.LastSeenAt, &d.CreatedAt, &stored)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Device{}, errors.New("edge device is not active")
+	}
+	if err != nil {
+		return Device{}, err
+	}
+	a, _ := hex.DecodeString(stored)
+	b, _ := hex.DecodeString(hashToken(secret))
+	if len(a) != len(b) || subtle.ConstantTimeCompare(a, b) != 1 {
+		return Device{}, errors.New("edge device credentials are invalid")
+	}
+	_, _ = s.db.Exec(ctx, `UPDATE store_edge_devices SET last_seen_at=now() WHERE id=$1`, d.ID)
+	return d, nil
+}
+
+func (s *Service) Snapshot(ctx context.Context, d Device) (Snapshot, error) {
+	var out Snapshot
+	out.GeneratedAt = time.Now()
+	out.StoreID, out.WarehouseID = d.StoreID, d.WarehouseID
+	if err := s.db.QueryRow(ctx, `SELECT name FROM stores WHERE id=$1 AND tenant_id=$2`, d.StoreID, d.TenantID).Scan(&out.StoreName); err != nil {
+		return Snapshot{}, err
+	}
+	rows, err := s.db.Query(ctx, `
+		SELECT p.id,p.title,COALESCE(p.sku,''),COALESCE(p.brand,''),COALESCE(p.oem_code,''),COALESCE(p.barcode,''),
+		       ib.on_hand::float8,ib.reserved::float8,(ib.on_hand-ib.reserved)::float8,
+		       COALESCE(o.selling_price,0)::bigint,ib.updated_at
+		FROM products p
+		JOIN inventory_balances ib ON ib.tenant_id=p.tenant_id AND ib.product_id=p.id AND ib.warehouse_id=$3
+		LEFT JOIN store_product_offers o ON o.tenant_id=p.tenant_id AND o.store_id=$2 AND o.warehouse_id=$3 AND o.product_id=p.id
+		WHERE p.tenant_id=$1 AND p.active AND p.deleted_at IS NULL
+		ORDER BY lower(p.title),p.id`, d.TenantID, d.StoreID, d.WarehouseID)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	defer rows.Close()
+	out.Products = make([]SnapshotProduct, 0)
+	for rows.Next() {
+		var p SnapshotProduct
+		if err := rows.Scan(&p.ProductID, &p.Title, &p.SKU, &p.Brand, &p.OEMCode, &p.Barcode, &p.OnHand, &p.Reserved, &p.Available, &p.SellingPrice, &p.UpdatedAt); err != nil {
+			return Snapshot{}, err
+		}
+		out.Products = append(out.Products, p)
+	}
+	return out, rows.Err()
+}
+
+func (s *Service) ListDevices(ctx context.Context, tenantID, storeID uuid.UUID) ([]Device, error) {
+	rows, err := s.db.Query(ctx, `SELECT id,tenant_id,store_id,warehouse_id,name,active,last_seen_at,created_at FROM store_edge_devices WHERE tenant_id=$1 AND store_id=$2 ORDER BY created_at DESC`, tenantID, storeID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]Device, 0)
+	for rows.Next() {
+		var d Device
+		if err := rows.Scan(&d.ID, &d.TenantID, &d.StoreID, &d.WarehouseID, &d.Name, &d.Active, &d.LastSeenAt, &d.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, d)
+	}
+	return out, rows.Err()
+}
+
+func (s *Service) Revoke(ctx context.Context, tenantID, storeID, deviceID uuid.UUID) error {
+	ct, err := s.db.Exec(ctx, `UPDATE store_edge_devices SET active=false,revoked_at=now() WHERE id=$1 AND tenant_id=$2 AND store_id=$3 AND active`, deviceID, tenantID, storeID)
+	if err != nil {
+		return err
+	}
+	if ct.RowsAffected() != 1 {
+		return errors.New("active edge device was not found")
+	}
+	return nil
+}
+
+func (s *Service) RecordSync(ctx context.Context, d Device, localID string, serverID *uuid.UUID, status, detail string) error {
+	_, err := s.db.Exec(ctx, `INSERT INTO store_edge_sync_events(device_id,tenant_id,store_id,local_operation_id,operation_type,server_reference_id,status,detail) VALUES($1,$2,$3,$4,'sale',$5,$6,$7) ON CONFLICT(device_id,local_operation_id) DO UPDATE SET server_reference_id=EXCLUDED.server_reference_id,status=EXCLUDED.status,detail=EXCLUDED.detail,received_at=now()`, d.ID, d.TenantID, d.StoreID, localID, serverID, status, detail)
+	return err
+}
+
+func randomToken(n int) (string, error) {
+	b := make([]byte, n)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(b), nil
+}
+
+func hashToken(v string) string {
+	s := sha256.Sum256([]byte(v))
+	return hex.EncodeToString(s[:])
+}

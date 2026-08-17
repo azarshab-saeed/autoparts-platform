@@ -4,6 +4,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { BoxIcon, CartIcon, ChartIcon, HomeIcon, SearchIcon, SettingsIcon, UsersIcon } from "./icons";
 import { useEffect } from "react";
 import { useAuth } from "@/components/auth-provider";
+import EdgeStatus from "@/components/edge-status";
 
 type NavItem = {
   href: string;
@@ -21,6 +22,7 @@ const nav: NavItem[] = [
   {href:"/store/purchases",label:"خرید",icon:BoxIcon,group:"عملیات"},
   {href:"/store/inventory",label:"انبار و کالاها",icon:BoxIcon,group:"عملیات",mobile:true},
   {href:"/store/import",label:"ورود اطلاعات",icon:BoxIcon,group:"عملیات",roles:["owner","admin","warehouse"]},
+  {href:"/store/edge",label:"فروش آفلاین / Edge",icon:SettingsIcon,group:"عملیات",roles:["owner","admin"]},
   {href:"/store/network",label:"شبکه قطعات",icon:SearchIcon,group:"شبکه"},
   {href:"/store/procurement",label:"تأمین از شبکه",icon:BoxIcon,group:"شبکه",mobile:true},
   {href:"/store/orders",label:"سفارش‌های شبکه",icon:CartIcon,group:"شبکه",mobile:true},
@@ -75,7 +77,7 @@ export default function StoreShell({children}:{children:React.ReactNode}){
     <main className="main-area">
       <header className="topbar">
         <div className="topbar-leading"><div className="mobile-brand"><span>ی</span><div><b>{session.storeName}</b><small>پنل فروشگاه</small></div></div><div className="topbar-context"><span className="topbar-context-icon"><CurrentIcon/></span><div><b>{current?.label||"پنل فروشگاه"}</b><small>{current?.group||"عملیات روزانه"}</small></div></div></div>
-        <div className="topbar-actions"><Link className="top-sale-action" href="/store/sales">+ فروش جدید</Link><div className="top-user"><div><b>{session.displayName}</b><span>{roleLabel[session.role]||session.role}</span></div><div className="avatar">{session.displayName.slice(0,1)}</div></div></div>
+        <div className="topbar-actions"><EdgeStatus/><Link className="top-sale-action" href="/store/sales">+ فروش جدید</Link><div className="top-user"><div><b>{session.displayName}</b><span>{roleLabel[session.role]||session.role}</span></div><div className="avatar">{session.displayName.slice(0,1)}</div></div></div>
       </header>
       <div className="page-content">{children}</div>
     </main>
