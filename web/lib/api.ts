@@ -15,7 +15,7 @@ import type {
   SaleItem,
   SettlementResult,
   Supplier,
-  UserSession, NetworkSearchResult, NetworkStoreOffer, StoreNetworkProfile, NetworkReservation, NetworkReservationStatus, ReservationFulfillmentResult, Expense, ExpenseCategory, PartyStatement, ProfitLoss, CashReport, DailyClosing, DashboardSummary, InventoryInsightReport, PagedResult, PurchaseHistoryItem, SaleHistoryItem, NetworkProcurement, ProcurementReceiveResult
+  UserSession, NetworkSearchResult, NetworkStoreOffer, StoreNetworkProfile, NetworkReservation, NetworkReservationStatus, ReservationFulfillmentResult, Expense, ExpenseCategory, PartyStatement, ProfitLoss, CashReport, DailyClosing, DashboardSummary, InventoryInsightReport, PagedResult, PurchaseHistoryItem, SaleHistoryItem, NetworkProcurement, ProcurementReceiveResult, VehicleMake, ProductSearchMetadata, ProductSearchTerm, ProductFitmentInput
 } from "./types";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
@@ -192,14 +192,32 @@ export async function postSaleReturn(session:UserSession,saleId:string,items:{so
 export async function postPurchaseReturn(session:UserSession,purchaseId:string,items:{source_item_id:string;qty:number}[],refundMethod:"cash"|"card"|"credit_balance"):Promise<ReturnResult>{ if(MOCK_MODE){const amount=items.reduce((s,x)=>s+applyMockPurchaseReturn(x.qty),0);if(refundMethod==="credit_balance")addMockPartyBalance("supplier",mockPurchaseDetail.supplier_id,-amount);return{id:crypto.randomUUID(),total_amount:amount,status:"posted"};} return request<ReturnResult>("/v1/returns/purchases",{method:"POST",headers:{"Idempotency-Key":crypto.randomUUID()},body:JSON.stringify({purchase_id:purchaseId,refund_method:refundMethod,items})},session.token);}
 
 
-export async function searchNetwork(q:string, opts:{lat?:number;lng?:number;sort?:"best"|"price"|"distance"|"fresh";limit?:number}={}):Promise<NetworkSearchResult[]>{
+export async function searchNetwork(q:string, opts:{lat?:number;lng?:number;sort?:"best"|"price"|"distance"|"fresh";limit?:number;vehicleVariantId?:string;year?:number}={}):Promise<NetworkSearchResult[]>{
   if(MOCK_MODE){
-    const tokens=q.trim().toLowerCase().split(/\s+/).filter(Boolean); let items=mockNetworkResults.filter(x=>{const hay=[x.title,x.brand,x.oem_code,x.sku].filter(Boolean).join(" ").toLowerCase().replace(/[۰-۹]/g,d=>String("۰۱۲۳۴۵۶۷۸۹".indexOf(d)));return tokens.every(t=>hay.includes(t));});
+    const tokens=q.trim().toLowerCase().split(/\s+/).filter(Boolean); let items=mockNetworkResults.filter(x=>{const hay=[x.title,x.brand,x.oem_code,x.sku].filter(Boolean).join(" ").toLowerCase().replace(/[۰-۹]/g,d=>String("۰۱۲۳۴۵۶۷۸۹".indexOf(d)));return (!tokens.length||tokens.every(t=>hay.includes(t)));});
     const sort=opts.sort||"best"; if(sort==="price")items=[...items].sort((a,b)=>a.selling_price-b.selling_price); if(sort==="distance")items=[...items].sort((a,b)=>(a.distance_km||999)-(b.distance_km||999));
     await new Promise(r=>setTimeout(r,180)); return items.slice(0,opts.limit||30);
   }
-  const p=new URLSearchParams({q,sort:opts.sort||"best",limit:String(opts.limit||30)}); if(opts.lat!=null&&opts.lng!=null){p.set("lat",String(opts.lat));p.set("lng",String(opts.lng));}
-  const out=await request<{items:NetworkSearchResult[]}>(`/v1/network/search?${p.toString()}`); return out.items;
+  const p=new URLSearchParams({q,sort:opts.sort||"best",limit:String(opts.limit||30)});
+  if(opts.lat!=null&&opts.lng!=null){p.set("lat",String(opts.lat));p.set("lng",String(opts.lng));}
+  if(opts.vehicleVariantId)p.set("vehicle_variant_id",opts.vehicleVariantId);
+  if(opts.year!=null)p.set("year",String(opts.year));
+  const out=await request<{items:NetworkSearchResult[]}>(`/v1/network/search?${p.toString()}`); return out.items ?? [];
+}
+export async function getVehicleCatalog():Promise<VehicleMake[]>{
+  if(MOCK_MODE)return [
+    {id:"make-peugeot",name:"پژو",models:[{id:"model-206",name:"206",variants:[{id:"92000000-0000-0000-0000-000000000001",name:"تیپ 5",engine_code:"TU5",year_from:1380,year_to:1400},{id:"92000000-0000-0000-0000-000000000002",name:"تیپ 2",engine_code:"TU3",year_from:1380,year_to:1400}]}]},
+    {id:"make-ikco",name:"ایران خودرو",models:[{id:"model-samand",name:"سمند",variants:[{id:"92000000-0000-0000-0000-000000000004",name:"LX EF7",engine_code:"EF7",year_from:1388,year_to:1402}]}]}
+  ];
+  const out=await request<{items:VehicleMake[]}>("/v1/vehicles/catalog");return out.items ?? [];
+}
+export async function getProductSearchMetadata(session:UserSession,productId:string):Promise<ProductSearchMetadata>{
+  if(MOCK_MODE)return{product_id:productId,terms:[],fitments:[]};
+  return request<ProductSearchMetadata>(`/v1/products/${encodeURIComponent(productId)}/search-metadata`,{},session.token);
+}
+export async function updateProductSearchMetadata(session:UserSession,productId:string,terms:ProductSearchTerm[],fitments:ProductFitmentInput[]):Promise<ProductSearchMetadata>{
+  if(MOCK_MODE)return{product_id:productId,terms,fitments:[]};
+  return request<ProductSearchMetadata>(`/v1/products/${encodeURIComponent(productId)}/search-metadata`,{method:"PUT",body:JSON.stringify({terms,fitments})},session.token);
 }
 export async function getNetworkStoreProfile(session:UserSession):Promise<StoreNetworkProfile>{ if(MOCK_MODE)return getMockNetworkProfile(); return request<StoreNetworkProfile>("/v1/network/store-profile",{},session.token); }
 export async function updateNetworkStoreProfile(session:UserSession,profile:StoreNetworkProfile):Promise<void>{ if(MOCK_MODE){setMockNetworkProfile(profile as any);return;} await request("/v1/network/store-profile",{method:"PUT",body:JSON.stringify({network_enabled:profile.network_enabled,address:profile.address||"",phone:profile.phone||"",city:profile.city||"",latitude:profile.latitude??null,longitude:profile.longitude??null})},session.token); }

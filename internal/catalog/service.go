@@ -45,8 +45,8 @@ func (s *Service) Create(ctx context.Context, tenantID uuid.UUID, in CreateProdu
 	return p, err
 }
 func (s *Service) List(ctx context.Context, tenantID uuid.UUID, q string, limit, offset int) (Page, error) {
-	q = "%" + strings.ToLower(strings.TrimSpace(q)) + "%"
-	rows, err := s.db.Query(ctx, `SELECT id,sku,title,brand,oem_code,barcode,unit,active FROM products WHERE tenant_id=$1 AND deleted_at IS NULL AND ($2='%%' OR normalized_title LIKE $2 OR lower(COALESCE(sku,'')) LIKE $2 OR lower(COALESCE(oem_code,'')) LIKE $2 OR lower(COALESCE(barcode,'')) LIKE $2) ORDER BY title,id LIMIT $3 OFFSET $4`, tenantID, q, limit+1, offset)
+	q = "%" + normalizeCatalogSearch(q) + "%"
+	rows, err := s.db.Query(ctx, `SELECT id,sku,title,brand,oem_code,barcode,unit,active FROM products p WHERE tenant_id=$1 AND deleted_at IS NULL AND ($2='%%' OR translate(lower(p.normalized_title),'۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩','01234567890123456789') LIKE $2 OR lower(COALESCE(sku,'')) LIKE $2 OR lower(COALESCE(oem_code,'')) LIKE $2 OR lower(COALESCE(barcode,'')) LIKE $2 OR EXISTS (SELECT 1 FROM product_search_terms pst WHERE pst.tenant_id=p.tenant_id AND pst.product_id=p.id AND pst.normalized_term LIKE $2)) ORDER BY title,id LIMIT $3 OFFSET $4`, tenantID, q, limit+1, offset)
 	if err != nil {
 		return Page{}, err
 	}
@@ -64,4 +64,13 @@ func (s *Service) List(ctx context.Context, tenantID uuid.UUID, q string, limit,
 		out.NextCursor = pagination.EncodeOffset(offset + limit)
 	}
 	return out, rows.Err()
+}
+
+func normalizeCatalogSearch(v string) string {
+	r := strings.NewReplacer(
+		"ي", "ی", "ى", "ی", "ك", "ک",
+		"۰", "0", "۱", "1", "۲", "2", "۳", "3", "۴", "4", "۵", "5", "۶", "6", "۷", "7", "۸", "8", "۹", "9",
+		"٠", "0", "١", "1", "٢", "2", "٣", "3", "٤", "4", "٥", "5", "٦", "6", "٧", "7", "٨", "8", "٩", "9",
+	)
+	return strings.ToLower(strings.Join(strings.Fields(r.Replace(strings.TrimSpace(v))), " "))
 }

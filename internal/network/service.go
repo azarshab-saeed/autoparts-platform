@@ -23,10 +23,19 @@ type candidate struct {
 	lng pgtype.Float8
 }
 
-func (s *Service) Search(ctx context.Context, q string, lat, lng *float64, order string, limit int) ([]SearchResult, error) {
+func (s *Service) Search(ctx context.Context, q string, vehicleVariantID *uuid.UUID, vehicleYear *int, lat, lng *float64, order string, limit int) ([]SearchResult, error) {
 	q = normalizeSearchText(q)
-	if len([]rune(q)) < 2 {
+	if q == "" && vehicleVariantID == nil {
+		return nil, errors.New("search query or vehicle filter is required")
+	}
+	if q != "" && len([]rune(q)) < 2 {
 		return nil, errors.New("search query must contain at least 2 characters")
+	}
+	if vehicleYear != nil && vehicleVariantID == nil {
+		return nil, errors.New("vehicle year requires vehicle_variant_id")
+	}
+	if vehicleYear != nil && (*vehicleYear < 1200 || *vehicleYear > 2200) {
+		return nil, errors.New("vehicle year must be between 1200 and 2200")
 	}
 	if limit < 1 || limit > 100 {
 		limit = 30
@@ -36,35 +45,55 @@ func (s *Service) Search(ctx context.Context, q string, lat, lng *float64, order
 		       s.id,s.name,COALESCE(s.city,''),COALESCE(s.public_address,''),COALESCE(s.public_phone,''),
 		       s.latitude::float8,s.longitude::float8,o.selling_price,
 		       (ib.on_hand-ib.reserved)::float8,o.allow_reservation,o.allow_procurement,
-		       GREATEST(ib.updated_at,o.last_verified_at) AS last_updated_at
+		       GREATEST(ib.updated_at,o.last_verified_at) AS last_updated_at,
+		       COALESCE(terms.exact_match,false),COALESCE(terms.exact_code_match,false),COALESCE(fit.variant_match,false),COALESCE(fit.summary,'')
 		FROM store_product_offers o
 		JOIN stores s ON s.id=o.store_id AND s.tenant_id=o.tenant_id
 		JOIN products p ON p.id=o.product_id AND p.tenant_id=o.tenant_id
 		JOIN inventory_balances ib ON ib.tenant_id=o.tenant_id AND ib.warehouse_id=o.warehouse_id AND ib.product_id=o.product_id
+		LEFT JOIN LATERAL (
+		  SELECT string_agg(pst.normalized_term,' ') AS all_terms,
+		         bool_or(pst.normalized_term=$1) AS exact_match,
+		         bool_or(pst.normalized_term=$1 AND pst.kind IN ('oem','equivalent')) AS exact_code_match
+		  FROM product_search_terms pst
+		  WHERE pst.tenant_id=p.tenant_id AND pst.product_id=p.id
+		) terms ON true
+		LEFT JOIN LATERAL (
+		  SELECT bool_or(pf.vehicle_variant_id=$2::uuid AND
+		                 ($3::int IS NULL OR ((COALESCE(pf.year_from,v.year_from) IS NULL OR COALESCE(pf.year_from,v.year_from) <= $3) AND (COALESCE(pf.year_to,v.year_to) IS NULL OR COALESCE(pf.year_to,v.year_to) >= $3)))) AS variant_match,
+		         string_agg(DISTINCT concat_ws(' ',mk.name,mo.name,v.name,NULLIF(v.engine_code,'')),'، ') AS summary
+		  FROM product_fitments pf
+		  JOIN vehicle_variants v ON v.id=pf.vehicle_variant_id
+		  JOIN vehicle_models mo ON mo.id=v.model_id
+		  JOIN vehicle_makes mk ON mk.id=mo.make_id
+		  WHERE pf.tenant_id=p.tenant_id AND pf.product_id=p.id
+		) fit ON true
 		CROSS JOIN LATERAL (
-		  SELECT translate(lower(concat_ws(' ',p.normalized_title,p.brand,p.oem_code,p.sku)),
+		  SELECT translate(lower(concat_ws(' ',p.normalized_title,p.brand,p.oem_code,p.sku,COALESCE(terms.all_terms,''))),
 		    '۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩','01234567890123456789') AS value
 		) search_text
 		WHERE s.network_enabled AND s.active AND o.visible AND p.active AND p.deleted_at IS NULL
 		  AND (ib.on_hand-ib.reserved) > 0
-		  AND NOT EXISTS (
+		  AND ($1='' OR NOT EXISTS (
 		    SELECT 1 FROM unnest(regexp_split_to_array($1, '[[:space:]]+')) token
 		    WHERE token <> '' AND search_text.value NOT ILIKE '%' || token || '%'
-		  )
+		  ))
+		  AND ($2::uuid IS NULL OR COALESCE(fit.variant_match,false))
 		ORDER BY GREATEST(ib.updated_at,o.last_verified_at) DESC
-		LIMIT 200`, q)
+		LIMIT 300`, q, vehicleVariantID, vehicleYear)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
 	now := time.Now()
-	items := make([]candidate, 0, 32)
+	items := make([]candidate, 0, 48)
 	for rows.Next() {
 		var c candidate
+		var exactAlias, exactCodeTerm, variantMatch bool
 		if err := rows.Scan(&c.OfferID, &c.ProductID, &c.Title, &c.SKU, &c.Brand, &c.OEMCode,
 			&c.StoreID, &c.StoreName, &c.City, &c.Address, &c.Phone, &c.lat, &c.lng, &c.SellingPrice,
-			&c.Available, &c.AllowReservation, &c.AllowProcurement, &c.LastUpdatedAt); err != nil {
+			&c.Available, &c.AllowReservation, &c.AllowProcurement, &c.LastUpdatedAt, &exactAlias, &exactCodeTerm, &variantMatch, &c.FitmentSummary); err != nil {
 			return nil, err
 		}
 		age := now.Sub(c.LastUpdatedAt)
@@ -79,6 +108,35 @@ func (s *Service) Search(ctx context.Context, q string, lat, lng *float64, order
 		if lat != nil && lng != nil && c.lat.Valid && c.lng.Valid {
 			d := haversine(*lat, *lng, c.lat.Float64, c.lng.Float64)
 			c.DistanceKM = &d
+		}
+		c.FitmentMatch = variantMatch
+		if q == "" {
+			c.Score = 40
+			c.MatchReason = "vehicle_fitment"
+		} else {
+			normOEM := normalizeSearchText(c.OEMCode)
+			normSKU := normalizeSearchText(c.SKU)
+			normTitle := normalizeSearchText(c.Title)
+			switch {
+			case q == normOEM || q == normSKU || exactCodeTerm:
+				c.Score = 100
+				c.MatchReason = "exact_code"
+			case exactAlias:
+				c.Score = 90
+				c.MatchReason = "exact_alias"
+			case strings.Contains(normTitle, q):
+				c.Score = 75
+				c.MatchReason = "title"
+			default:
+				c.Score = 55
+				c.MatchReason = "keyword"
+			}
+		}
+		if variantMatch {
+			c.Score += 40
+			if c.MatchReason == "" || c.MatchReason == "keyword" {
+				c.MatchReason = "vehicle_fitment"
+			}
 		}
 		items = append(items, c)
 	}
@@ -108,18 +166,21 @@ func (s *Service) Search(ctx context.Context, q string, lat, lng *float64, order
 			if a.SellingPrice != b.SellingPrice {
 				return a.SellingPrice < b.SellingPrice
 			}
-			return distance(a) < distance(b)
+			return a.Score > b.Score
 		case "distance":
 			if distance(a) != distance(b) {
 				return distance(a) < distance(b)
 			}
-			return a.SellingPrice < b.SellingPrice
+			return a.Score > b.Score
 		case "fresh":
 			if !a.LastUpdatedAt.Equal(b.LastUpdatedAt) {
 				return a.LastUpdatedAt.After(b.LastUpdatedAt)
 			}
-			return a.SellingPrice < b.SellingPrice
-		default: // best: reliable inventory, then proximity, then price
+			return a.Score > b.Score
+		default:
+			if a.Score != b.Score {
+				return a.Score > b.Score
+			}
 			if freshRank(a.Freshness) != freshRank(b.Freshness) {
 				return freshRank(a.Freshness) < freshRank(b.Freshness)
 			}
@@ -147,7 +208,7 @@ func (s *Service) SearchProcurement(ctx context.Context, buyerStoreID uuid.UUID,
 	if want < 1 || want > 100 {
 		want = 30
 	}
-	items, err := s.Search(ctx, q, lat, lng, order, 100)
+	items, err := s.Search(ctx, q, nil, nil, lat, lng, order, 100)
 	if err != nil {
 		return nil, err
 	}

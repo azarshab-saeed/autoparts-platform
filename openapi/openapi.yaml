@@ -1,8 +1,8 @@
 openapi: 3.1.0
 info:
   title: Auto Parts Platform API
-  version: 0.12.0
-  description: Phase 12 contract. Adds store-to-store network procurement with seller inventory holds, buyer/seller workflow, atomic receiving, linked sale/purchase documents, perpetual inventory, and double-entry accounting. Monetary integer fields use Iranian toman (application currency code IRT).
+  version: 0.13.0
+  description: Phase 13 contract. Adds vehicle catalog and product fitment metadata, OEM/alias search terms, vehicle-filtered cross-store search, and relevance ranking while preserving Phase 12 procurement. Monetary integer fields use Iranian toman (application currency code IRT).
 servers:
 - url: http://localhost:8080
 components:
@@ -225,6 +225,51 @@ components:
         target_qty:
           type: number
           minimum: 0
+    ProductSearchTerm:
+      type: object
+      required: [kind, term]
+      properties:
+        kind: {type: string, enum: [alias, oem, equivalent]}
+        term: {type: string, minLength: 2, maxLength: 120}
+    ProductFitmentInput:
+      type: object
+      required: [vehicle_variant_id]
+      properties:
+        vehicle_variant_id: {type: string, format: uuid}
+        year_from: {type: integer, minimum: 1200, maximum: 2200}
+        year_to: {type: integer, minimum: 1200, maximum: 2200}
+        notes: {type: string}
+    ProductSearchMetadataUpdate:
+      type: object
+      properties:
+        terms:
+          type: array
+          maxItems: 50
+          items: {$ref: '#/components/schemas/ProductSearchTerm'}
+        fitments:
+          type: array
+          maxItems: 50
+          items: {$ref: '#/components/schemas/ProductFitmentInput'}
+    VehicleVariant:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        name: {type: string}
+        engine_code: {type: string}
+        year_from: {type: integer}
+        year_to: {type: integer}
+    VehicleModel:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        name: {type: string}
+        variants: {type: array, items: {$ref: '#/components/schemas/VehicleVariant'}}
+    VehicleMake:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        name: {type: string}
+        models: {type: array, items: {$ref: '#/components/schemas/VehicleModel'}}
     NetworkOfferUpdate:
       type: object
       required:
@@ -637,6 +682,31 @@ paths:
       responses:
         '201':
           description: product created
+  /v1/products/{product_id}/search-metadata:
+    get:
+      description: Returns tenant-owned aliases, alternate OEM/equivalent codes, and vehicle fitments for a product.
+      security: [{keycloakOIDC: []}]
+      parameters:
+      - {in: path, name: product_id, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: Product search metadata}
+    put:
+      description: Replaces aliases and fitments for the product. Owner, admin, or warehouse role required.
+      security: [{keycloakOIDC: []}]
+      parameters:
+      - {in: path, name: product_id, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ProductSearchMetadataUpdate'}
+      responses:
+        '200': {description: Updated product search metadata}
+  /v1/vehicles/catalog:
+    get:
+      description: Public hierarchical vehicle make/model/variant catalog used for fitment search.
+      responses:
+        '200': {description: Vehicle catalog}
   /v1/customers:
     get:
       security:
@@ -905,10 +975,18 @@ paths:
       parameters:
       - in: query
         name: q
-        required: true
+        required: false
+        description: Text, SKU, OEM, alias, or equivalent code. Required unless vehicle_variant_id is provided.
         schema:
           type: string
           minLength: 2
+      - in: query
+        name: vehicle_variant_id
+        schema: {type: string, format: uuid}
+      - in: query
+        name: year
+        description: Optional model year, requires vehicle_variant_id.
+        schema: {type: integer, minimum: 1200, maximum: 2200}
       - in: query
         name: lat
         schema:

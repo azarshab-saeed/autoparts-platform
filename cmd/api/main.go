@@ -14,6 +14,7 @@ import (
 	"github.com/example/autoparts-core/internal/catalog"
 	"github.com/example/autoparts-core/internal/customers"
 	"github.com/example/autoparts-core/internal/finance"
+	"github.com/example/autoparts-core/internal/fitment"
 	"github.com/example/autoparts-core/internal/inventory"
 	"github.com/example/autoparts-core/internal/network"
 	"github.com/example/autoparts-core/internal/operations"
@@ -57,6 +58,7 @@ func main() {
 	inventorySvc := inventory.NewService(pool)
 	networkSvc := network.NewService(pool)
 	financeSvc := finance.NewService(pool)
+	fitmentSvc := fitment.NewService(pool)
 	returnSvc := returnsvc.NewService(pool)
 	reservationSvc := reservations.NewService(pool)
 	operationsSvc := operations.NewService(pool)
@@ -108,6 +110,40 @@ func main() {
 		}
 		api.WriteJSON(w, http.StatusOK, out)
 	})
+	protected.HandleFunc("GET /v1/products/{product_id}/search-metadata", func(w http.ResponseWriter, r *http.Request) {
+		c, _ := auth.ClaimsFrom(r.Context())
+		productID, err := uuid.Parse(r.PathValue("product_id"))
+		if err != nil {
+			api.WriteError(w, api.BadRequest("invalid_product_id", "product id must be a UUID"))
+			return
+		}
+		out, err := fitmentSvc.GetProductMetadata(r.Context(), c.TenantID, productID)
+		if err != nil {
+			api.WriteError(w, api.NotFound("product_search_metadata_not_found", err.Error()))
+			return
+		}
+		api.WriteJSON(w, http.StatusOK, out)
+	})
+	protected.Handle("PUT /v1/products/{product_id}/search-metadata", auth.RequireRoles("owner", "admin", "warehouse")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, _ := auth.ClaimsFrom(r.Context())
+		productID, err := uuid.Parse(r.PathValue("product_id"))
+		if err != nil {
+			api.WriteError(w, api.BadRequest("invalid_product_id", "product id must be a UUID"))
+			return
+		}
+		var in fitment.UpdateMetadata
+		if err := decodeJSON(r, &in); err != nil {
+			api.WriteError(w, err)
+			return
+		}
+		out, err := fitmentSvc.UpdateProductMetadata(r.Context(), c.TenantID, productID, in)
+		if err != nil {
+			api.WriteError(w, api.Conflict("product_search_metadata_rejected", err.Error()))
+			return
+		}
+		api.WriteJSON(w, http.StatusOK, out)
+	})))
+
 	protected.Handle("POST /v1/products", auth.RequireRoles("owner", "admin", "warehouse")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		c, _ := auth.ClaimsFrom(r.Context())
 		var in catalog.CreateProduct
@@ -959,6 +995,14 @@ func main() {
 
 	protectedHandler := auth.Middleware(verifier, protected)
 	root := http.NewServeMux()
+	root.HandleFunc("GET /v1/vehicles/catalog", func(w http.ResponseWriter, r *http.Request) {
+		out, err := fitmentSvc.Catalog(r.Context())
+		if err != nil {
+			api.WriteError(w, api.Conflict("vehicle_catalog_failed", err.Error()))
+			return
+		}
+		api.WriteJSON(w, http.StatusOK, map[string]any{"items": out})
+	})
 	root.HandleFunc("GET /v1/network/search", func(w http.ResponseWriter, r *http.Request) {
 		q := strings.TrimSpace(r.URL.Query().Get("q"))
 		lat, err := optionalFloatQuery(r, "lat", -90, 90)
@@ -980,8 +1024,26 @@ func main() {
 			api.WriteError(w, err)
 			return
 		}
+		var vehicleVariantID *uuid.UUID
+		if raw := strings.TrimSpace(r.URL.Query().Get("vehicle_variant_id")); raw != "" {
+			parsed, e := uuid.Parse(raw)
+			if e != nil {
+				api.WriteError(w, api.BadRequest("invalid_vehicle_variant_id", "vehicle_variant_id must be a UUID"))
+				return
+			}
+			vehicleVariantID = &parsed
+		}
+		var vehicleYear *int
+		if raw := strings.TrimSpace(r.URL.Query().Get("year")); raw != "" {
+			y, e := strconv.Atoi(raw)
+			if e != nil || y < 1200 || y > 2200 {
+				api.WriteError(w, api.BadRequest("invalid_vehicle_year", "year must be between 1200 and 2200"))
+				return
+			}
+			vehicleYear = &y
+		}
 		_, _ = reservationSvc.ExpireDue(r.Context(), 100)
-		out, err := networkSvc.Search(r.Context(), q, lat, lng, r.URL.Query().Get("sort"), limit)
+		out, err := networkSvc.Search(r.Context(), q, vehicleVariantID, vehicleYear, lat, lng, r.URL.Query().Get("sort"), limit)
 		if err != nil {
 			api.WriteError(w, api.BadRequest("network_search_failed", err.Error()))
 			return

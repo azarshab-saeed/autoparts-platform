@@ -25,6 +25,10 @@ type SearchResult struct {
 	LastUpdatedAt    time.Time `json:"last_updated_at"`
 	Freshness        string    `json:"freshness"`
 	DistanceKM       *float64  `json:"distance_km,omitempty"`
+	FitmentMatch     bool      `json:"fitment_match,omitempty"`
+	FitmentSummary   string    `json:"fitment_summary,omitempty"`
+	MatchReason      string    `json:"match_reason,omitempty"`
+	Score            int       `json:"score,omitempty"`
 }
 
 type StoreOffer struct {

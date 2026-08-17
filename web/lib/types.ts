@@ -110,7 +110,20 @@ export type NetworkSearchResult = {
   last_updated_at: string;
   freshness: "live" | "recent" | "stale";
   distance_km?: number;
+  fitment_match?: boolean;
+  fitment_summary?: string;
+  match_reason?: "exact_code" | "exact_alias" | "title" | "keyword" | "vehicle_fitment";
+  score?: number;
 };
+
+
+export type VehicleVariant = { id: string; name: string; engine_code?: string; year_from?: number; year_to?: number };
+export type VehicleModel = { id: string; name: string; variants: VehicleVariant[] };
+export type VehicleMake = { id: string; name: string; models: VehicleModel[] };
+export type ProductSearchTerm = { kind: "alias" | "oem" | "equivalent"; term: string };
+export type ProductFitment = { vehicle_variant_id: string; make_name: string; model_name: string; variant_name: string; engine_code?: string; year_from?: number; year_to?: number; notes?: string };
+export type ProductSearchMetadata = { product_id: string; terms: ProductSearchTerm[]; fitments: ProductFitment[] };
+export type ProductFitmentInput = { vehicle_variant_id: string; year_from?: number; year_to?: number; notes?: string };
 
 export type NetworkStoreOffer = {
   product_id: string;

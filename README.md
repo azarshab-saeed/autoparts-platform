@@ -190,3 +190,7 @@ Phase 11 turns the core transaction engine into a more complete daily store work
 ## Phase 12 network procurement
 
 Stores can now procure inventory directly from other network-enabled stores. Creating a procurement request immediately holds seller inventory; the seller accepts and marks it ready; the buyer then receives it. Receive is a single SERIALIZABLE cross-tenant transaction that posts the seller credit sale/AR/COGS and buyer credit purchase/AP while moving inventory and preserving weighted-average valuation. Network counterpart customer/supplier records are linked automatically, and the procurement stores both document IDs for auditability.
+
+## Phase 13 — Advanced Search & Vehicle Fitment
+
+Phase 13 adds vehicle make/model/variant fitment, alternate OEM/equivalent search terms, relevance-ranked network search, and the `/store/fitment` catalog-maintenance UI. See `PHASE_13_RUN.md`.
