@@ -5,6 +5,7 @@ import (
 	"embed"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -20,23 +21,56 @@ import (
 	"github.com/example/autoparts-core/internal/storeedge"
 )
 
-var version = "0.15.7"
+var version = "0.15.7.1"
+
+const windowsServiceName = "AutoPartsStoreEdge"
 
 //go:embed offline.html
 var assets embed.FS
 
 func main() {
-	dataDir := strings.TrimSpace(os.Getenv("AUTOPARTS_EDGE_DATA_DIR"))
-	if dataDir == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			log.Fatal(err)
+	if len(os.Args) > 1 {
+		switch strings.ToLower(strings.TrimSpace(os.Args[1])) {
+		case "version", "--version", "-version":
+			fmt.Println(version)
+			return
+		case "open", "--open":
+			if err := openLocalUI(); err != nil {
+				log.Fatal(err)
+			}
+			return
+		case "service":
+			if runtime.GOOS != "windows" {
+				log.Fatal("service mode is only available on Windows")
+			}
+			if err := runWindowsService(windowsServiceName, runAgent); err != nil {
+				log.Fatal(err)
+			}
+			return
 		}
-		dataDir = filepath.Join(home, ".autoparts-store-edge")
 	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	if err := runAgent(ctx, false); err != nil {
+		log.Fatal(err)
+	}
+}
+
+func runAgent(ctx context.Context, serviceMode bool) error {
+	dataDir, err := edgeDataDir(serviceMode)
+	if err != nil {
+		return err
+	}
+	closeLog, err := configureAgentLogging(dataDir, serviceMode)
+	if err != nil {
+		return err
+	}
+	defer closeLog()
+
 	store, err := storeedge.Open(dataDir)
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 	cloud := storeedge.NewCloud()
 	syncer := storeedge.NewSyncer(store, cloud)
@@ -48,7 +82,7 @@ func main() {
 		_, _ = w.Write(b)
 	})
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "service": "autoparts-store-edge", "version": version})
+		writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "service": "autoparts-store-edge", "version": version, "mode": map[bool]string{true: "service", false: "console"}[serviceMode]})
 	})
 	mux.HandleFunc("GET /v1/status", func(w http.ResponseWriter, r *http.Request) {
 		st := store.State()
@@ -81,9 +115,9 @@ func main() {
 		if strings.TrimSpace(in.DeviceName) == "" {
 			in.DeviceName = hostname()
 		}
-		ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+		requestCtx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 		defer cancel()
-		paired, err := cloud.Pair(ctx, in.CloudURL, in.PairCode, in.DeviceName)
+		paired, err := cloud.Pair(requestCtx, in.CloudURL, in.PairCode, in.DeviceName)
 		if err != nil {
 			writeError(w, http.StatusBadGateway, err)
 			return
@@ -92,7 +126,7 @@ func main() {
 			writeError(w, http.StatusInternalServerError, err)
 			return
 		}
-		if err := syncer.Run(ctx); err != nil {
+		if err := syncer.Run(requestCtx); err != nil {
 			writeJSON(w, http.StatusOK, map[string]any{"paired": true, "store_name": paired.StoreName, "sync_warning": err.Error()})
 			return
 		}
@@ -121,9 +155,9 @@ func main() {
 		}
 		writeJSON(w, http.StatusCreated, out)
 		go func() {
-			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+			syncCtx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 			defer cancel()
-			_ = syncer.Run(ctx)
+			_ = syncer.Run(syncCtx)
 		}()
 	})
 	mux.HandleFunc("POST /v1/offline-sales/{id}/retry", func(w http.ResponseWriter, r *http.Request) {
@@ -131,18 +165,18 @@ func main() {
 			writeError(w, http.StatusConflict, err)
 			return
 		}
-		ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+		requestCtx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
 		defer cancel()
-		if err := syncer.Run(ctx); err != nil {
+		if err := syncer.Run(requestCtx); err != nil {
 			writeError(w, http.StatusBadGateway, err)
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]string{"status": "retry_started"})
 	})
 	mux.HandleFunc("POST /v1/sync", func(w http.ResponseWriter, r *http.Request) {
-		ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+		requestCtx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 		defer cancel()
-		if err := syncer.Run(ctx); err != nil {
+		if err := syncer.Run(requestCtx); err != nil {
 			writeError(w, http.StatusBadGateway, err)
 			return
 		}
@@ -152,28 +186,79 @@ func main() {
 	handler := localCORS(store, mux)
 	cfg := store.Config()
 	srv := &http.Server{Addr: cfg.Listen, Handler: handler, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 30 * time.Second}
+
 	go func() {
 		ticker := time.NewTicker(time.Duration(cfg.SyncSeconds) * time.Second)
 		defer ticker.Stop()
-		for range ticker.C {
-			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-			_ = syncer.Run(ctx)
-			cancel()
-		}
-	}()
-	go func() {
-		log.Printf("AutoParts Store Edge %s listening on http://%s data=%s os=%s", version, cfg.Listen, dataDir, runtime.GOOS)
-		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			log.Fatal(err)
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				syncCtx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+				_ = syncer.Run(syncCtx)
+				cancel()
+			}
 		}
 	}()
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-	<-ctx.Done()
+	serveErr := make(chan error, 1)
+	go func() {
+		log.Printf("AutoParts Store Edge %s listening on http://%s data=%s os=%s service=%t", version, cfg.Listen, dataDir, runtime.GOOS, serviceMode)
+		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			serveErr <- err
+			return
+		}
+		serveErr <- nil
+	}()
+
+	select {
+	case <-ctx.Done():
+	case err := <-serveErr:
+		if err != nil {
+			return err
+		}
+		return nil
+	}
+
 	shutdown, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 	defer cancel()
-	_ = srv.Shutdown(shutdown)
+	return srv.Shutdown(shutdown)
+}
+
+func edgeDataDir(serviceMode bool) (string, error) {
+	if v := strings.TrimSpace(os.Getenv("AUTOPARTS_EDGE_DATA_DIR")); v != "" {
+		return v, nil
+	}
+	if runtime.GOOS == "windows" && serviceMode {
+		base := strings.TrimSpace(os.Getenv("PROGRAMDATA"))
+		if base == "" {
+			base = `C:\ProgramData`
+		}
+		return filepath.Join(base, "AutoParts", "StoreEdge", "data"), nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, ".autoparts-store-edge"), nil
+}
+
+func configureAgentLogging(dataDir string, serviceMode bool) (func(), error) {
+	if !serviceMode {
+		return func() {}, nil
+	}
+	logDir := filepath.Join(filepath.Dir(dataDir), "logs")
+	if err := os.MkdirAll(logDir, 0o755); err != nil {
+		return nil, err
+	}
+	f, err := os.OpenFile(filepath.Join(logDir, "agent.log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		return nil, err
+	}
+	log.SetOutput(f)
+	log.SetFlags(log.LstdFlags | log.Lmicroseconds)
+	return func() { _ = f.Close() }, nil
 }
 
 func localCORS(store *storeedge.Store, next http.Handler) http.Handler {

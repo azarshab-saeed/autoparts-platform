@@ -56,18 +56,15 @@ http://127.0.0.1:17624/
 7. فروش باید `synced` شود و در `/store/sales/history` دیده شود.
 8. `make rc-db-check` باید edge provenance/sync reconciliation را PASS کند.
 
-## Windows build/install
+## Windows customer installer
+
+Phase 15.7.1 نصب production را harden می‌کند. برای Release مشتری Setup واقعی تولید می‌شود:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File edge/windows/build.ps1
-powershell -ExecutionPolicy Bypass -File edge/windows/install.ps1
+powershell -ExecutionPolicy Bypass -File edge/windows/build-installer.ps1 -Version 0.15.7.1
 ```
 
-Installer فعلی user-level است و admin نمی‌خواهد. Agent در Startup کاربر قرار می‌گیرد و shortcut «AutoParts Offline POS» روی Desktop ساخته می‌شود. حذف معمولی local data را نگه می‌دارد؛ برای پاک‌کردن کامل:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File edge/windows/uninstall.ps1 -RemoveData
-```
+کاربر نهایی فقط `AutoParts-Store-Agent-Setup-0.15.7.1.exe` را اجرا می‌کند؛ Agent به‌صورت Windows Service واقعی و auto-start نصب می‌شود. جزئیات در `PHASE_15_7_1_RUN.md` است.
 
 ## محدودیت آگاهانه
 

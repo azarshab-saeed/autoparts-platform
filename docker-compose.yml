@@ -132,6 +132,7 @@ services:
         NEXT_PUBLIC_KEYCLOAK_REALM: autoparts
         NEXT_PUBLIC_KEYCLOAK_CLIENT_ID: autoparts-web
         NEXT_PUBLIC_SHOW_DEV_CREDENTIALS: "true"
+        NEXT_PUBLIC_EDGE_INSTALLER_URL: "${NEXT_PUBLIC_EDGE_INSTALLER_URL:-}"
     environment:
       NEXT_PUBLIC_API_URL: http://localhost:8080
       NEXT_PUBLIC_MOCK_MODE: "false"
@@ -139,6 +140,7 @@ services:
       NEXT_PUBLIC_KEYCLOAK_REALM: autoparts
       NEXT_PUBLIC_KEYCLOAK_CLIENT_ID: autoparts-web
       NEXT_PUBLIC_SHOW_DEV_CREDENTIALS: "true"
+      NEXT_PUBLIC_EDGE_INSTALLER_URL: "${NEXT_PUBLIC_EDGE_INSTALLER_URL:-}"
     ports:
       - "3000:3000"
     depends_on:

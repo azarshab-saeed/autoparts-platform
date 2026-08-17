@@ -1,4 +1,4 @@
-.PHONY: rc-static-check deps fmt test build run compose-up compose-rebuild compose-down web-dev web-build auth-logs migrations prod-preflight prod-up prod-down backup rc-smoke rc-db-check rc-load rc-check edge-run edge-test edge-build edge-build-windows
+.PHONY: rc-static-check deps fmt test build run compose-up compose-rebuild compose-down web-dev web-build auth-logs migrations prod-preflight prod-up prod-down backup rc-smoke rc-db-check rc-load rc-check edge-run edge-test edge-build edge-build-windows edge-build-windows-installer edge-linux-install
 
 deps:
 	go mod tidy
@@ -76,4 +76,10 @@ edge-build:
 	CGO_ENABLED=0 go build -trimpath -o bin/store-edge ./cmd/store-edge
 
 edge-build-windows:
-	powershell -ExecutionPolicy Bypass -File edge/windows/build.ps1
+	powershell -ExecutionPolicy Bypass -File edge/windows/build.ps1 -Version 0.15.7.1
+
+edge-build-windows-installer:
+	powershell -ExecutionPolicy Bypass -File edge/windows/build-installer.ps1 -Version 0.15.7.1
+
+edge-linux-install:
+	./edge/linux/install-user-service.sh

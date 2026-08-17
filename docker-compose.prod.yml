@@ -122,6 +122,7 @@ services:
         NEXT_PUBLIC_KEYCLOAK_REALM: autoparts
         NEXT_PUBLIC_KEYCLOAK_CLIENT_ID: autoparts-web
         NEXT_PUBLIC_SHOW_DEV_CREDENTIALS: "false"
+        NEXT_PUBLIC_EDGE_INSTALLER_URL: ${NEXT_PUBLIC_EDGE_INSTALLER_URL:-}
     restart: unless-stopped
     environment:
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:?set NEXT_PUBLIC_API_URL}
@@ -130,6 +131,7 @@ services:
       NEXT_PUBLIC_KEYCLOAK_REALM: autoparts
       NEXT_PUBLIC_KEYCLOAK_CLIENT_ID: autoparts-web
       NEXT_PUBLIC_SHOW_DEV_CREDENTIALS: "false"
+      NEXT_PUBLIC_EDGE_INSTALLER_URL: ${NEXT_PUBLIC_EDGE_INSTALLER_URL:-}
     depends_on:
       api:
         condition: service_healthy
