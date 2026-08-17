@@ -1,0 +1,150 @@
+services:
+  postgres:
+    image: postgres:18.4
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-autoparts}
+      POSTGRES_USER: ${POSTGRES_USER:-autoparts}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-autoparts} -d ${POSTGRES_DB:-autoparts}"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    volumes:
+      - autoparts_pg:/var/lib/postgresql
+    networks: [backend]
+
+  db-prepare:
+    image: postgres:18.4
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_ADMIN_USER: ${POSTGRES_USER:-autoparts}
+      POSTGRES_ADMIN_DB: ${POSTGRES_DB:-autoparts}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      KEYCLOAK_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD:?set KEYCLOAK_DB_PASSWORD}
+      SEED_DEMO_DATA: "false"
+    volumes:
+      - ./dev/postgres:/dev/postgres:ro
+      - ./migrations:/migrations:ro
+    entrypoint: ["/bin/sh", "/dev/postgres/prepare.sh"]
+    networks: [backend]
+
+  keycloak:
+    image: ${KEYCLOAK_IMAGE:-keycloak/keycloak:26.7.0}
+    command: ["start"]
+    restart: unless-stopped
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/keycloak
+      KC_DB_USERNAME: keycloak
+      KC_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD:?set KEYCLOAK_DB_PASSWORD}
+      KC_HOSTNAME: ${KEYCLOAK_HOSTNAME:?set KEYCLOAK_HOSTNAME}
+      KC_HTTP_ENABLED: "true"
+      KC_PROXY_HEADERS: xforwarded
+      KC_HEALTH_ENABLED: "true"
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN_USERNAME:?set KEYCLOAK_ADMIN_USERNAME}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?set KEYCLOAK_ADMIN_PASSWORD}
+    depends_on:
+      db-prepare:
+        condition: service_completed_successfully
+    ports:
+      - "127.0.0.1:${KEYCLOAK_BIND_PORT:-8081}:8080"
+    networks: [backend]
+
+  keycloak-bootstrap:
+    image: ${KEYCLOAK_IMAGE:-keycloak/keycloak:26.7.0}
+    restart: "no"
+    entrypoint: ["/bin/sh", "/opt/keycloak/bootstrap-prod.sh"]
+    environment:
+      KEYCLOAK_BOOTSTRAP_SERVER: http://keycloak:8080
+      KEYCLOAK_REALM: autoparts
+      KEYCLOAK_ADMIN_USERNAME: ${KEYCLOAK_ADMIN_USERNAME:?set KEYCLOAK_ADMIN_USERNAME}
+      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?set KEYCLOAK_ADMIN_PASSWORD}
+      APP_PUBLIC_URL: ${APP_PUBLIC_URL:?set APP_PUBLIC_URL}
+    volumes:
+      - ./keycloak/bootstrap-prod.sh:/opt/keycloak/bootstrap-prod.sh:ro
+    depends_on:
+      keycloak:
+        condition: service_started
+    networks: [backend]
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        GOPROXY: "${GO_MODULE_PROXY:-https://proxy.golang.org|https://goproxy.cn|direct}"
+        GOSUMDB: "${GO_SUMDB:-sum.golang.google.cn}"
+        VERSION: "${APP_VERSION:-0.14.0}"
+        COMMIT: "${APP_COMMIT:-unknown}"
+        BUILD_TIME: "${APP_BUILD_TIME:-unknown}"
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?set DATABASE_URL}
+      KEYCLOAK_ISSUER: ${KEYCLOAK_ISSUER:?set KEYCLOAK_ISSUER}
+      KEYCLOAK_JWKS_URL: http://keycloak:8080/realms/autoparts/protocol/openid-connect/certs
+      KEYCLOAK_AUDIENCE: autoparts-api
+      PORT: "8080"
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:?set ALLOWED_ORIGINS}
+      RATE_LIMIT_PER_MINUTE: ${RATE_LIMIT_PER_MINUTE:-600}
+      PUBLIC_SEARCH_RATE_LIMIT_PER_MINUTE: ${PUBLIC_SEARCH_RATE_LIMIT_PER_MINUTE:-120}
+      TRUST_PROXY_HEADERS: "true"
+      ENABLE_HSTS: "true"
+    depends_on:
+      db-prepare:
+        condition: service_completed_successfully
+      keycloak-bootstrap:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:8080/readyz >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+    ports:
+      - "127.0.0.1:${API_BIND_PORT:-8080}:8080"
+    networks: [backend]
+
+  web:
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:?set NEXT_PUBLIC_API_URL}
+        NEXT_PUBLIC_MOCK_MODE: "false"
+        NEXT_PUBLIC_KEYCLOAK_URL: ${NEXT_PUBLIC_KEYCLOAK_URL:?set NEXT_PUBLIC_KEYCLOAK_URL}
+        NEXT_PUBLIC_KEYCLOAK_REALM: autoparts
+        NEXT_PUBLIC_KEYCLOAK_CLIENT_ID: autoparts-web
+        NEXT_PUBLIC_SHOW_DEV_CREDENTIALS: "false"
+    restart: unless-stopped
+    environment:
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:?set NEXT_PUBLIC_API_URL}
+      NEXT_PUBLIC_MOCK_MODE: "false"
+      NEXT_PUBLIC_KEYCLOAK_URL: ${NEXT_PUBLIC_KEYCLOAK_URL:?set NEXT_PUBLIC_KEYCLOAK_URL}
+      NEXT_PUBLIC_KEYCLOAK_REALM: autoparts
+      NEXT_PUBLIC_KEYCLOAK_CLIENT_ID: autoparts-web
+      NEXT_PUBLIC_SHOW_DEV_CREDENTIALS: "false"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:3000/login >/dev/null 2>&1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+    ports:
+      - "127.0.0.1:${WEB_BIND_PORT:-3000}:3000"
+    networks: [backend]
+
+networks:
+  backend:
+    driver: bridge
+
+volumes:
+  autoparts_pg:

@@ -381,3 +381,18 @@ export type CashReport = {
   closing?: DailyClosing;
   changed_after_close: boolean;
 };
+
+
+export type AuditLogEntry = {
+  id: number;
+  occurred_at: string;
+  request_id: string;
+  actor_user_id: string;
+  role: string;
+  method: string;
+  path: string;
+  route: string;
+  status: number;
+  remote_ip: string;
+  metadata?: Record<string, unknown>;
+};

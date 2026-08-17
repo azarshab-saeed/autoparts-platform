@@ -7,11 +7,18 @@ PORT="${POSTGRES_PORT:-5432}"
 ADMIN_USER="${POSTGRES_ADMIN_USER:-autoparts}"
 ADMIN_DB="${POSTGRES_ADMIN_DB:-autoparts}"
 MIGRATIONS_DIR="${MIGRATIONS_DIR:-/migrations}"
+KEYCLOAK_DB_PASSWORD="${KEYCLOAK_DB_PASSWORD:-keycloak}"
+SEED_DEMO_DATA="${SEED_DEMO_DATA:-true}"
 psql_base="psql -h $HOST -p $PORT -U $ADMIN_USER"
 
-if ! $psql_base -d "$ADMIN_DB" -tAc "SELECT 1 FROM pg_roles WHERE rolname='keycloak'" | grep -q 1; then
-  $psql_base -d "$ADMIN_DB" -v ON_ERROR_STOP=1 -c "CREATE ROLE keycloak LOGIN PASSWORD 'keycloak';"
-fi
+# Reconcile the Keycloak DB role without embedding a password directly into
+# shell SQL. psql quotes the variable and \gexec executes the generated DDL.
+$psql_base -d "$ADMIN_DB" -v ON_ERROR_STOP=1 -v kc_password="$KEYCLOAK_DB_PASSWORD" <<'SQL'
+SELECT format('CREATE ROLE keycloak LOGIN PASSWORD %L', :'kc_password')
+WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='keycloak') \gexec
+SELECT format('ALTER ROLE keycloak LOGIN PASSWORD %L', :'kc_password') \gexec
+SQL
+
 if ! $psql_base -d "$ADMIN_DB" -tAc "SELECT 1 FROM pg_database WHERE datname='keycloak'" | grep -q 1; then
   $psql_base -d "$ADMIN_DB" -v ON_ERROR_STOP=1 -c "CREATE DATABASE keycloak OWNER keycloak;"
 fi
@@ -47,12 +54,15 @@ for file in "$MIGRATIONS_DIR"/*.sql; do
   $psql_base -d "$ADMIN_DB" -v ON_ERROR_STOP=1 -c "INSERT INTO schema_migrations(version) VALUES('$version');"
 done
 
-$psql_base -d "$ADMIN_DB" -v ON_ERROR_STOP=1 -f /dev/postgres/seed.sql
+if [ "$SEED_DEMO_DATA" = "true" ]; then
+  echo "loading development seed data"
+  $psql_base -d "$ADMIN_DB" -v ON_ERROR_STOP=1 -f /dev/postgres/seed.sql
 
-# Phase 11.1.4: older dev seeds overwrote transactional reserved quantities on
-# every compose start. Repair only the cross-store demo inventory from active
-# network reservations after seeding. This is idempotent and does not touch
-# production/non-demo inventory rows.
-if $psql_base -d "$ADMIN_DB" -tAc "SELECT to_regclass('public.network_reservations') IS NOT NULL" | grep -q t; then
-  $psql_base -d "$ADMIN_DB" -v ON_ERROR_STOP=1 -f /dev/postgres/repair_network_demo_reservations.sql
+  # Older dev seeds overwrote transactional reserved quantities on compose
+  # start. Repair only demo rows from active reservations/procurements.
+  if $psql_base -d "$ADMIN_DB" -tAc "SELECT to_regclass('public.network_reservations') IS NOT NULL" | grep -q t; then
+    $psql_base -d "$ADMIN_DB" -v ON_ERROR_STOP=1 -f /dev/postgres/repair_network_demo_reservations.sql
+  fi
+else
+  echo "SEED_DEMO_DATA=false; skipping all demo seed/repair SQL"
 fi

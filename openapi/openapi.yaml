@@ -1,8 +1,8 @@
 openapi: 3.1.0
 info:
   title: Auto Parts Platform API
-  version: 0.13.0
-  description: Phase 13 contract. Adds vehicle catalog and product fitment metadata, OEM/alias search terms, vehicle-filtered cross-store search, and relevance ranking while preserving Phase 12 procurement. Monetary integer fields use Iranian toman (application currency code IRT).
+  version: 0.14.0
+  description: Phase 14 contract. Adds production health/readiness/version endpoints, audit logging, request IDs, rate limiting, security hardening and deployment operations while preserving Phase 13 vehicle fitment search. Monetary integer fields use Iranian toman (application currency code IRT).
 servers:
 - url: http://localhost:8080
 components:
@@ -632,6 +632,20 @@ components:
         last_sale_at: {type: string, format: date-time}
         days_since_sale: {type: integer}
         dead_stock: {type: boolean}
+    AuditLogEntry:
+      type: object
+      properties:
+        id: {type: integer}
+        occurred_at: {type: string, format: date-time}
+        request_id: {type: string}
+        actor_user_id: {type: string, format: uuid}
+        role: {type: string}
+        method: {type: string}
+        path: {type: string}
+        route: {type: string}
+        status: {type: integer}
+        remote_ip: {type: string}
+        metadata: {type: object, additionalProperties: true}
     DailyClosingCreate:
       type: object
       required: [business_date, opening_cash, actual_cash]
@@ -657,11 +671,20 @@ components:
 paths:
   /healthz:
     get:
+      description: Liveness probe. Does not depend on PostgreSQL or Keycloak.
       responses:
-        '200':
-          description: healthy
-        '503':
-          description: database unavailable
+        '200': {description: Process is alive}
+  /readyz:
+    get:
+      description: Readiness probe. Verifies PostgreSQL connectivity and the latest required migration.
+      responses:
+        '200': {description: Ready to serve traffic}
+        '503': {description: Database unavailable or schema not ready}
+  /version:
+    get:
+      description: Build metadata injected at image build time.
+      responses:
+        '200': {description: Version, commit, and build time}
   /v1/me:
     get:
       security:
@@ -1415,3 +1438,16 @@ paths:
               schema: {$ref: '#/components/schemas/DailyClosing'}
         '409': {description: Date already closed or business conflict}
 
+
+  /v1/audit-logs:
+    get:
+      description: Paginated store-scoped audit log for mutating API operations. Owner or admin role required.
+      security:
+      - keycloakOIDC: []
+      parameters:
+      - {in: query, name: cursor, schema: {type: string}}
+      - {in: query, name: limit, schema: {type: integer, minimum: 1, maximum: 100}}
+      responses:
+        '200':
+          description: Audit log page
+        '403': {description: Owner/admin role required}

@@ -3,12 +3,15 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/example/autoparts-core/internal/catalog"
@@ -19,8 +22,10 @@ import (
 	"github.com/example/autoparts-core/internal/network"
 	"github.com/example/autoparts-core/internal/operations"
 	"github.com/example/autoparts-core/internal/platform/api"
+	"github.com/example/autoparts-core/internal/platform/audit"
 	"github.com/example/autoparts-core/internal/platform/auth"
 	"github.com/example/autoparts-core/internal/platform/db"
+	"github.com/example/autoparts-core/internal/platform/httpx"
 	"github.com/example/autoparts-core/internal/platform/pagination"
 	"github.com/example/autoparts-core/internal/procurement"
 	"github.com/example/autoparts-core/internal/purchases"
@@ -32,7 +37,16 @@ import (
 	"github.com/google/uuid"
 )
 
+var (
+	version   = "dev"
+	commit    = "unknown"
+	buildTime = "unknown"
+)
+
+const latestMigration = "012_production_hardening.sql"
+
 func main() {
+	log.SetFlags(0)
 	pool, err := db.New(nilContext(), os.Getenv("DATABASE_URL"))
 	if err != nil {
 		log.Fatal(err)
@@ -62,18 +76,13 @@ func main() {
 	returnSvc := returnsvc.NewService(pool)
 	reservationSvc := reservations.NewService(pool)
 	operationsSvc := operations.NewService(pool)
+	auditSvc := audit.NewService(pool)
 
 	public := http.NewServeMux()
 	protected := http.NewServeMux()
 
 	public.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
-		ctx, cancel := timeout(r, 2*time.Second)
-		defer cancel()
-		if err := pool.Ping(ctx); err != nil {
-			api.WriteJSON(w, http.StatusServiceUnavailable, map[string]string{"status": "down"})
-			return
-		}
-		api.WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+		api.WriteJSON(w, http.StatusOK, map[string]any{"status": "ok", "service": "autoparts-api", "version": version})
 	})
 
 	protected.HandleFunc("GET /v1/me", func(w http.ResponseWriter, r *http.Request) {
@@ -993,7 +1002,23 @@ func main() {
 		api.WriteJSON(w, http.StatusCreated, out)
 	})))
 
-	protectedHandler := auth.Middleware(verifier, protected)
+	protected.Handle("GET /v1/audit-logs", auth.RequireRoles("owner", "admin")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, _ := auth.ClaimsFrom(r.Context())
+		limit, offset, err := pageParams(r)
+		if err != nil {
+			api.WriteError(w, err)
+			return
+		}
+		items, total, err := auditSvc.List(r.Context(), c.TenantID, c.StoreID, limit, offset)
+		if err != nil {
+			api.WriteError(w, api.Conflict("audit_query_failed", err.Error()))
+			return
+		}
+		api.WriteJSON(w, http.StatusOK, pagedEnvelope(items, total, limit, offset))
+	})))
+
+	trustProxy := envBool("TRUST_PROXY_HEADERS", false)
+	protectedHandler := auth.Middleware(verifier, audit.Middleware(pool, trustProxy, protected))
 	root := http.NewServeMux()
 	root.HandleFunc("GET /v1/vehicles/catalog", func(w http.ResponseWriter, r *http.Request) {
 		out, err := fitmentSvc.Catalog(r.Context())
@@ -1003,7 +1028,8 @@ func main() {
 		}
 		api.WriteJSON(w, http.StatusOK, map[string]any{"items": out})
 	})
-	root.HandleFunc("GET /v1/network/search", func(w http.ResponseWriter, r *http.Request) {
+	publicSearchLimiter := httpx.NewRateLimiter(envInt("PUBLIC_SEARCH_RATE_LIMIT_PER_MINUTE", 120), time.Minute, trustProxy)
+	root.Handle("GET /v1/network/search", publicSearchLimiter.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		q := strings.TrimSpace(r.URL.Query().Get("q"))
 		lat, err := optionalFloatQuery(r, "lat", -90, 90)
 		if err != nil {
@@ -1049,17 +1075,64 @@ func main() {
 			return
 		}
 		api.WriteJSON(w, http.StatusOK, map[string]any{"items": out, "count": len(out)})
-	})
+	})))
 	root.Handle("/v1/", protectedHandler)
 	root.Handle("/healthz", public)
+	root.HandleFunc("GET /readyz", func(w http.ResponseWriter, r *http.Request) {
+		ctx, cancel := timeout(r, 2*time.Second)
+		defer cancel()
+		if err := pool.Ping(ctx); err != nil {
+			api.WriteJSON(w, http.StatusServiceUnavailable, map[string]any{"status": "not_ready", "database": "down"})
+			return
+		}
+		var applied bool
+		if err := pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE version=$1)`, latestMigration).Scan(&applied); err != nil || !applied {
+			api.WriteJSON(w, http.StatusServiceUnavailable, map[string]any{"status": "not_ready", "database": "ok", "migration": latestMigration})
+			return
+		}
+		api.WriteJSON(w, http.StatusOK, map[string]any{"status": "ready", "database": "ok", "migration": latestMigration})
+	})
+	root.HandleFunc("GET /version", func(w http.ResponseWriter, r *http.Request) {
+		api.WriteJSON(w, http.StatusOK, map[string]string{"version": version, "commit": commit, "build_time": buildTime})
+	})
+
+	globalLimiter := httpx.NewRateLimiter(envInt("RATE_LIMIT_PER_MINUTE", 600), time.Minute, trustProxy)
+	handler := httpx.RequestID(httpx.Recover(httpx.SecurityHeaders(envBool("ENABLE_HSTS", false), httpx.AccessLog(trustProxy, globalLimiter.Handler(cors(root))))))
 
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
 	}
-	srv := &http.Server{Addr: ":" + port, Handler: requestLog(cors(root)), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 90 * time.Second}
-	log.Printf("api listening on :%s", port)
-	log.Fatal(srv.ListenAndServe())
+	srv := &http.Server{
+		Addr:              ":" + port,
+		Handler:           handler,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       15 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       90 * time.Second,
+		MaxHeaderBytes:    1 << 20,
+	}
+
+	errCh := make(chan error, 1)
+	go func() { errCh <- srv.ListenAndServe() }()
+	log.Printf(`{"level":"info","event":"api_started","port":%q,"version":%q,"commit":%q}`, port, version, commit)
+
+	stopCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	select {
+	case err := <-errCh:
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Fatal(err)
+		}
+	case <-stopCtx.Done():
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		if err := srv.Shutdown(ctx); err != nil {
+			log.Printf(`{"level":"error","event":"api_shutdown_failed","error":%q}`, err.Error())
+		} else {
+			log.Print(`{"level":"info","event":"api_stopped"}`)
+		}
+	}
 }
 
 func decodeJSON(r *http.Request, dst any) error {
@@ -1184,15 +1257,23 @@ func cors(next http.Handler) http.Handler {
 	}
 	set := map[string]bool{}
 	for _, origin := range strings.Split(allowed, ",") {
-		set[strings.TrimSpace(origin)] = true
+		if origin = strings.TrimSpace(origin); origin != "" {
+			set[origin] = true
+		}
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		origin := r.Header.Get("Origin")
-		if origin != "" && set[origin] {
+		origin := strings.TrimSpace(r.Header.Get("Origin"))
+		if origin != "" && !set[origin] {
+			api.WriteError(w, api.Forbidden("origin_not_allowed", "request origin is not allowed"))
+			return
+		}
+		if origin != "" {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
 			w.Header().Set("Vary", "Origin")
-			w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, Idempotency-Key, X-Bootstrap-Secret")
+			w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, Idempotency-Key, X-Request-ID")
 			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
+			w.Header().Set("Access-Control-Expose-Headers", "X-Request-ID, Retry-After")
+			w.Header().Set("Access-Control-Max-Age", "600")
 		}
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
@@ -1202,10 +1283,26 @@ func cors(next http.Handler) http.Handler {
 	})
 }
 
-func requestLog(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		started := time.Now()
-		next.ServeHTTP(w, r)
-		log.Printf("%s %s %s", r.Method, r.URL.Path, time.Since(started).Round(time.Millisecond))
-	})
+func envInt(name string, fallback int) int {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return fallback
+	}
+	v, err := strconv.Atoi(raw)
+	if err != nil || v <= 0 {
+		return fallback
+	}
+	return v
+}
+
+func envBool(name string, fallback bool) bool {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return fallback
+	}
+	v, err := strconv.ParseBool(raw)
+	if err != nil {
+		return fallback
+	}
+	return v
 }

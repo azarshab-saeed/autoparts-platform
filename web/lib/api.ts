@@ -15,7 +15,7 @@ import type {
   SaleItem,
   SettlementResult,
   Supplier,
-  UserSession, NetworkSearchResult, NetworkStoreOffer, StoreNetworkProfile, NetworkReservation, NetworkReservationStatus, ReservationFulfillmentResult, Expense, ExpenseCategory, PartyStatement, ProfitLoss, CashReport, DailyClosing, DashboardSummary, InventoryInsightReport, PagedResult, PurchaseHistoryItem, SaleHistoryItem, NetworkProcurement, ProcurementReceiveResult, VehicleMake, ProductSearchMetadata, ProductSearchTerm, ProductFitmentInput
+  UserSession, NetworkSearchResult, NetworkStoreOffer, StoreNetworkProfile, NetworkReservation, NetworkReservationStatus, ReservationFulfillmentResult, Expense, ExpenseCategory, PartyStatement, ProfitLoss, CashReport, DailyClosing, DashboardSummary, InventoryInsightReport, PagedResult, PurchaseHistoryItem, SaleHistoryItem, NetworkProcurement, ProcurementReceiveResult, VehicleMake, ProductSearchMetadata, ProductSearchTerm, ProductFitmentInput, AuditLogEntry
 } from "./types";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
@@ -328,4 +328,12 @@ export async function getCashReport(session:UserSession,date:string):Promise<Cas
 export async function closeBusinessDay(session:UserSession,input:{businessDate:string;openingCash:number;actualCash:number;note:string}):Promise<DailyClosing>{
   if(MOCK_MODE)return closeMockBusinessDay(input);
   return request<DailyClosing>("/v1/daily-closings",{method:"POST",headers:{"Idempotency-Key":crypto.randomUUID()},body:JSON.stringify({business_date:input.businessDate,opening_cash:input.openingCash,actual_cash:input.actualCash,note:input.note})},session.token);
+}
+
+
+export async function getAuditLogs(session:UserSession, cursor=""):Promise<PagedResult<AuditLogEntry>>{
+  if(MOCK_MODE)return{items:[],total:0,next_cursor:""};
+  const p=new URLSearchParams({limit:"100"});if(cursor)p.set("cursor",cursor);
+  const out=await request<PagedResult<AuditLogEntry>>(`/v1/audit-logs?${p.toString()}`,{},session.token);
+  return {...out,items:out.items??[]};
 }

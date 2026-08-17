@@ -7,6 +7,9 @@ WORKDIR /src
 #   checksum verification enabled.
 ARG GOPROXY="https://proxy.golang.org|https://goproxy.cn|direct"
 ARG GOSUMDB="sum.golang.google.cn"
+ARG VERSION="dev"
+ARG COMMIT="unknown"
+ARG BUILD_TIME="unknown"
 ENV GOPROXY=${GOPROXY} \
     GOSUMDB=${GOSUMDB} \
     GOTOOLCHAIN=local
@@ -32,7 +35,7 @@ RUN set -eux; \
     go mod verify
 
 # The build must not mutate go.mod/go.sum after the dependency step.
-RUN CGO_ENABLED=0 GOOS=linux go build -mod=readonly -trimpath -ldflags="-s -w" -o /out/api ./cmd/api
+RUN CGO_ENABLED=0 GOOS=linux go build -mod=readonly -trimpath -ldflags="-s -w -X main.version=${VERSION} -X main.commit=${COMMIT} -X main.buildTime=${BUILD_TIME}" -o /out/api ./cmd/api
 
 FROM alpine:3.22
 RUN adduser -D -H -u 10001 app

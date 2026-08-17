@@ -1,10 +1,10 @@
 # Auto Parts Platform
 
-**Current milestone: Phase 11 — Store Operations & Reporting Hardening**
+**Current milestone: Phase 14 — Production Readiness & Security Hardening**
 
 The repository now contains a runnable store frontend, Keycloak authentication, Go API, PostgreSQL inventory/accounting core, purchases, sales, settlement/returns, cross-store search, inventory-backed reservations, atomic reservation fulfillment, operating expenses, party statements, profit/loss reporting, operational sale/purchase history, a live management dashboard, inventory health analytics, cash/card movement reporting, and daily closing snapshots. Monetary integer values use **Iranian toman** (`IRT` application code).
 
-See `PHASE_11_RUN.md` for the current upgrade/test flow and `RELEASE_NOTES_PHASE11.md` for implementation details.
+See `PHASE_14_RUN.md` for the current upgrade/test flow and `RELEASE_NOTES_PHASE14.md` for implementation details.
 
 ---
 
@@ -126,6 +126,7 @@ Do not delete a production database/volume to apply realm configuration changes.
 - `/store/accounts` - customer/supplier balances, settlement, and account statements
 - `/store/expenses` - operating expense entry
 - `/store/reports` - store profit/loss reporting
+- `/store/audit` - owner/admin security and mutation audit log
 - `/store/reports/inventory` - inventory valuation, low-stock, velocity and dead-stock analysis
 - `/store/closing` - cash/card report and daily closing
 - `/store/returns` - sale/purchase returns
@@ -194,3 +195,8 @@ Stores can now procure inventory directly from other network-enabled stores. Cre
 ## Phase 13 — Advanced Search & Vehicle Fitment
 
 Phase 13 adds vehicle make/model/variant fitment, alternate OEM/equivalent search terms, relevance-ranked network search, and the `/store/fitment` catalog-maintenance UI. See `PHASE_13_RUN.md`.
+
+
+## Phase 14 — Production Readiness & Security Hardening
+
+Phase 14 adds liveness/readiness/version endpoints, structured JSON HTTP logging, request IDs, strict CORS and security headers, rate limiting, panic recovery, graceful shutdown and a tenant-scoped audit trail for mutating requests. A separate `docker-compose.prod.yml` disables demo seeding and dev-user reconciliation, bootstraps only production-safe Keycloak realm/client configuration, binds application ports to loopback for a TLS reverse proxy, and includes deployment preflight plus PostgreSQL backup/restore tooling. See `docs/ops/PRODUCTION_RUNBOOK.md`.

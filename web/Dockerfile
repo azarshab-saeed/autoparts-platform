@@ -24,6 +24,8 @@ RUN npm run build
 FROM node:22-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production
-COPY --from=build /app .
+RUN addgroup -S nodejs && adduser -S nextjs -G nodejs
+COPY --from=build --chown=nextjs:nodejs /app .
+USER nextjs
 EXPOSE 3000
 CMD ["npm","start"]

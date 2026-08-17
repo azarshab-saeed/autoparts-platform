@@ -1,4 +1,4 @@
-.PHONY: deps fmt test build run compose-up compose-rebuild compose-down web-dev web-build auth-logs migrations
+.PHONY: deps fmt test build run compose-up compose-rebuild compose-down web-dev web-build auth-logs migrations prod-preflight prod-up prod-down backup
 
 deps:
 	go mod tidy
@@ -39,3 +39,15 @@ auth-logs:
 
 migrations:
 	docker compose run --rm db-prepare
+
+prod-preflight:
+	ENV_FILE=.env.production ./ops/preflight.sh
+
+prod-up:
+	docker compose --env-file .env.production -f docker-compose.prod.yml up -d --build
+
+prod-down:
+	docker compose --env-file .env.production -f docker-compose.prod.yml down
+
+backup:
+	COMPOSE_FILE=docker-compose.prod.yml ./ops/backup.sh

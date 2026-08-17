@@ -1,1 +1,5 @@
 .env
+.env.production
+backups/
+*.dump
+*.dump.sha256
