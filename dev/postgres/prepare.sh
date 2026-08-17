@@ -48,3 +48,11 @@ for file in "$MIGRATIONS_DIR"/*.sql; do
 done
 
 $psql_base -d "$ADMIN_DB" -v ON_ERROR_STOP=1 -f /dev/postgres/seed.sql
+
+# Phase 11.1.4: older dev seeds overwrote transactional reserved quantities on
+# every compose start. Repair only the cross-store demo inventory from active
+# network reservations after seeding. This is idempotent and does not touch
+# production/non-demo inventory rows.
+if $psql_base -d "$ADMIN_DB" -tAc "SELECT to_regclass('public.network_reservations') IS NOT NULL" | grep -q t; then
+  $psql_base -d "$ADMIN_DB" -v ON_ERROR_STOP=1 -f /dev/postgres/repair_network_demo_reservations.sql
+fi
