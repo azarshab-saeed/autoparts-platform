@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
+import "@fontsource-variable/vazirmatn/wght.css";
 import "./globals.css";
 import "./ui-polish.css";
+import "./ui-polish-15-5-1.css";
 import { AuthProvider } from "@/components/auth-provider";
 
 export const metadata: Metadata = {

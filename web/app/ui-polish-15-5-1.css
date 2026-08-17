@@ -1,0 +1,143 @@
+/* Phase 15.5.1 — Persian typography, readable density, and desktop mechanic polish.
+   Loaded after globals.css and ui-polish.css. */
+:root{
+  --ui-text:#17243b;
+  --ui-muted:#5f6f85;
+  --ui-muted-soft:#748398;
+  --ui-border:#dbe3ee;
+  --ui-border-strong:#cbd6e4;
+}
+
+html,body{
+  font-family:"Vazirmatn Variable","Vazirmatn","Noto Sans Arabic","Noto Sans",Tahoma,Arial,sans-serif!important;
+  font-optical-sizing:auto;
+  font-feature-settings:"kern" 1,"calt" 1;
+  text-rendering:optimizeLegibility;
+  line-height:1.65;
+}
+button,input,select,textarea,kbd{font-family:inherit!important}
+input,select,textarea{font-size:14px;color:var(--ui-text)}
+button{font-size:13px}
+::placeholder{color:#8a98aa;opacity:1}
+
+/* Persian + Latin/OEM/SKU rendering in Firefox/Linux. */
+.sale-number,.network-price,.offer-price,.line-total,.payment-summary,.purchase-summary,
+.product-cell span,.line-product span,.search-results span,.network-card p,.offer-product span,
+.store-order p,.store-order-total,.reorder-value,.block-note,.fitment-summary{
+  unicode-bidi:plaintext;
+}
+code,kbd,[data-ltr],.latin-token{direction:ltr;unicode-bidi:isolate;font-variant-numeric:tabular-nums}
+input[type="number"],.kpi strong,.inventory-stats strong,.network-price b,.offer-price b,.line-total,
+.payment-summary b,.purchase-summary b,.store-order-total b{font-variant-numeric:tabular-nums}
+
+/* Global readability: screenshots showed the 8–12px layer as too small on 1920px/Linux. */
+.page-content{max-width:1600px;padding:30px 34px 42px}
+.page-head{margin-bottom:24px}
+.page-head h1{font-size:30px;line-height:1.3;letter-spacing:-.45px;margin:4px 0 8px;font-weight:800}
+.page-head p{font-size:14px;line-height:1.9;color:var(--ui-muted);max-width:850px}
+.eyebrow{font-size:12.5px;letter-spacing:0;font-weight:800}
+.primary-btn,.ghost-btn,.submit-sale,.success-btn,.danger-btn,.table-action{font-size:13px;min-height:40px}
+.panel{border-color:var(--ui-border);box-shadow:0 7px 24px rgba(31,50,81,.045)}
+.panel-head{margin-bottom:17px}
+.panel-head h2,.panel-head b{font-size:16px;line-height:1.55}
+.panel-head p,.panel-head span{font-size:12.5px;line-height:1.75;color:var(--ui-muted)}
+.success-box,.error-box,.network-notice{font-size:13px;line-height:1.8}
+.table-state{font-size:13px;color:var(--ui-muted)}
+.empty-state{font-size:13px;line-height:1.9;color:var(--ui-muted);padding:38px 20px}
+.empty-state b{font-size:14px;color:#33445e}
+.empty-state span{font-size:12.5px;color:var(--ui-muted)}
+
+/* Sidebar: preserve information density without making labels microscopic. */
+.sidebar{width:274px;padding:17px 14px 15px}
+.main-area{margin-right:274px;width:calc(100% - 274px)}
+.brand{padding-bottom:13px}.brand b{font-size:15px}.brand span{font-size:11px;margin-top:3px;color:#99a8bd}
+.store-context{padding:10px 11px;margin-bottom:12px}.store-context b{font-size:12.5px}.store-context span{font-size:10.5px;color:#9aa9be}
+.nav-group{margin-bottom:10px}.nav-group-title{font-size:10.5px;color:#8191aa;padding:9px 12px 5px;letter-spacing:0}
+.nav-item{min-height:42px;font-size:13px;padding:9px 11px;color:#acb8c9}.nav-icon svg{width:19px;height:19px}.nav-item small{font-size:9.5px}
+.sidebar-help b{font-size:11.5px}.sidebar-help span{font-size:10.5px;line-height:1.75;color:#91a1b8}.logout{font-size:12px}
+
+/* Replace the decorative/non-functional global search in the header with page context. */
+.topbar{height:70px;padding:0 32px}
+.topbar-context{display:flex;align-items:center;gap:10px;min-width:190px}
+.topbar-context-icon{width:36px;height:36px;display:grid;place-items:center;border:1px solid #dce6f3;border-radius:11px;background:#f4f7fc;color:#3268bf}
+.topbar-context-icon svg{width:18px;height:18px}
+.topbar-context b,.topbar-context small{display:block}.topbar-context b{font-size:13.5px;color:#26364f}.topbar-context small{font-size:10.5px;color:#7b899b;margin-top:2px}
+.top-user b{font-size:13px}.top-user span{font-size:11px;color:#6f7f94}.top-sale-action{font-size:12.5px;padding:9px 14px}
+
+/* Dashboard. */
+.polished-kpis .kpi,.kpi{padding:18px 18px;min-height:126px;border-color:var(--ui-border)}
+.polished-kpis .kpi span,.kpi>span{font-size:12.5px;color:#65768b}
+.polished-kpis .kpi strong,.kpi strong{font-size:20px;line-height:1.45;margin:10px 0 8px}
+.polished-kpis .kpi small,.kpi small{font-size:11.5px!important;color:#718198;line-height:1.65}
+.attention-list a{min-height:45px;font-size:12.5px}.attention-list a span{color:#4e6077}.attention-list a b{font-size:13px}
+.quick-panel a,.quick-panel button{font-size:12.5px;padding:11px 12px}
+.real-bars small{font-size:11px;color:#65768a}
+
+/* Tables: readable in the 1920px screenshots, but still compact enough for operations. */
+table{font-variant-numeric:tabular-nums}
+th{font-size:12px!important;color:#64758a!important;font-weight:700!important;letter-spacing:0;background:#f8fafc!important}
+td{font-size:13px!important;color:#34445a;line-height:1.65}
+td,th{padding:13px 14px!important;border-bottom-color:#e8edf4!important}
+tbody tr:hover td{background:#fbfdff}
+.product-cell b,.line-product b{font-size:13.5px}.product-cell span,.line-product span{font-size:11.5px!important;color:#718096!important;margin-top:4px}
+.status-pill,.reservation-status,.pill{font-size:10.5px!important;font-weight:700}
+.row-actions button,.table-action{font-size:11.5px}
+
+/* Sales & purchases: reduce dead space and make the empty state instructive rather than blank. */
+.sale-layout,.purchase-layout{grid-template-columns:minmax(0,1fr) 372px;gap:20px}
+.search-card{height:60px;border-color:#d8e2ee}.search-card input{font-size:15px}.search-results b{font-size:13.5px}.search-results span,.search-results small{font-size:11px!important;color:#6f8096!important}.search-results strong{font-size:12.5px}
+.sale-items .empty-state,.purchase-items .empty-state{min-height:170px;margin:16px;border:1px dashed #d3deeb;border-radius:14px;background:linear-gradient(145deg,#fbfdff,#f7faff);display:flex;flex-direction:column;align-items:center;justify-content:center;padding:28px}
+.sale-items .empty-state:before,.purchase-items .empty-state:before{content:"＋";width:40px;height:40px;display:grid;place-items:center;border-radius:12px;background:#edf4ff;color:#2f67c7;font-size:23px;font-weight:500;margin-bottom:10px}
+.checkout-card{width:auto;padding:19px;border-color:var(--ui-border);box-shadow:0 9px 28px rgba(31,50,81,.06)}
+.checkout-card>div>span{font-size:12px;color:#607187}.customer-picker input{height:42px;font-size:13px}.payment-grid button{font-size:12px;padding:9px 5px}.checkout-total strong{font-size:21px}.checkout-note{font-size:10.5px!important;color:#738298;line-height:1.8}
+.payment-summary div,.purchase-summary div{font-size:12.5px}.payment-summary b,.purchase-summary b{font-size:13px}
+.sale-line,.purchase-line{min-height:60px}.qty-control input,.price-input input{font-size:13px}
+
+/* Inventory and operational summaries. */
+.inventory-stats{gap:15px}.inventory-stats article{padding:18px;border-color:var(--ui-border);min-height:112px}.inventory-stats span{font-size:12.5px;color:#65768b}.inventory-stats strong{font-size:20px;margin:9px 0 6px}.inventory-stats small{font-size:11.5px;color:#728198}
+.inventory-toolbar{padding:14px 16px}.inline-search input{font-size:13.5px}.switch-filter{font-size:12px}.inventory-table td,.inventory-table th{padding-top:14px!important;padding-bottom:14px!important}.reorder-value{font-size:11.5px;color:#617289}
+.inventory-table tbody tr:has(.status-pill.danger) td{background:#fffafa}.inventory-table tbody tr:has(.status-pill.danger):hover td{background:#fff6f6}
+
+/* Network / procurement: clearer hierarchy and less washed-out secondary text. */
+.network-profile-panel,.network-offers-panel,.store-orders-panel{margin-bottom:18px}
+.network-offer-row{padding:14px 15px!important}.offer-product b{font-size:13.5px}.offer-product span{font-size:11.5px!important;color:#687a91!important;line-height:1.7}.offer-stock span,.offer-price span{font-size:10.5px!important;color:#718197!important}.offer-stock b,.offer-price b{font-size:13px}.offer-price small{font-size:10.5px!important;color:#7a899a!important}
+.store-order{border-color:var(--ui-border)!important}.store-order h3{font-size:14px!important}.store-order p{font-size:11.5px!important;color:#65768b!important}.store-order-foot small{font-size:10.5px!important;color:#738399!important}.store-order-total b{font-size:14px}.store-order-total span{font-size:10.5px!important;color:#718197!important}
+
+/* Mechanic: compact the hero after search, enlarge text, and use desktop width efficiently. */
+.polished-mechanic{font-family:"Vazirmatn Variable","Vazirmatn","Noto Sans Arabic",Tahoma,Arial,sans-serif!important}
+.polished-mechanic .mechanic-header{height:68px;padding:0 28px}.mechanic-brand b{font-size:14px}.mechanic-brand small{font-size:10.5px!important}.mechanic-account{font-size:12px}.mechanic-account a,.mechanic-account button{font-size:11.5px!important}
+.polished-mechanic .mechanic-hero{padding:36px 28px 18px;min-height:auto}.polished-mechanic .hero-copy{max-width:900px}.polished-mechanic .hero-copy h1{font-size:38px!important;line-height:1.35;letter-spacing:-.8px;margin:6px 0 9px}.polished-mechanic .hero-copy p{font-size:14px!important;line-height:2;color:#5e7087;max-width:780px}.polished-mechanic .hero-copy .eyebrow{font-size:12px}
+.polished-mechanic .mechanic-search{max-width:1000px;margin-top:18px}.mechanic-search-input{height:56px!important}.mechanic-search-input input{font-size:15px!important}.polished-mechanic .mechanic-search>button{height:56px;font-size:13.5px!important}.search-suggestions{font-size:11px}.search-suggestions button{font-size:10.5px;padding:6px 10px}
+.polished-mechanic .vehicle-filter-card{max-width:1320px;margin-top:16px;padding:11px 12px}.vehicle-filter-copy b{font-size:12px}.vehicle-filter-copy span{font-size:10.5px;color:#718197}.polished-mechanic .vehicle-filter-card select,.polished-mechanic .vehicle-filter-card input{font-size:12px;height:40px}.selected-vehicle{font-size:11.5px!important;max-width:1100px}
+.polished-mechanic .mechanic-filters{max-width:1320px;margin-top:12px;padding-top:11px}.sort-pills button,.location-btn{font-size:11.5px!important}
+.polished-mechanic .mechanic-results{max-width:1480px;padding:16px 28px 58px}.results-head b{font-size:16px!important}.results-head span{font-size:12px!important;color:#62738a!important}.results-head small{font-size:10.5px!important;color:#718197!important}
+.network-card{padding:18px!important}.network-card.featured:before{margin:-18px -18px 15px}.network-title-row h2{font-size:16px!important;line-height:1.55}.network-card p{font-size:11.5px!important;color:#697a90!important}.network-price b{font-size:16px!important}.network-price span,.best-tag,.match-reason,.fitment-ok,.reserve-tag,.fresh{font-size:10px!important}.fitment-summary{font-size:10.5px!important;color:#64758b!important;line-height:1.7}.store-info b{font-size:13px!important}.store-info span{font-size:11px!important;color:#68798f!important}.distance b{font-size:13px}.distance span{font-size:9.5px!important}.network-meta{font-size:10.5px!important}.network-actions>*{font-size:12px!important;min-height:41px!important}
+.mechanic-start b{font-size:15px}.mechanic-start span{font-size:12px!important;line-height:1.8}.mechanic-start button{font-size:12px}
+
+@media(min-width:1440px){
+  .polished-mechanic .network-cards{grid-template-columns:repeat(3,minmax(0,1fr))!important;gap:15px!important}
+}
+@media(min-width:821px) and (max-width:1439px){
+  .polished-mechanic .network-cards{grid-template-columns:repeat(2,minmax(0,1fr))!important}
+}
+@media(max-width:1180px){
+  .sidebar{width:238px}.main-area{margin-right:238px;width:calc(100% - 238px)}
+  .page-content{padding-left:24px;padding-right:24px}
+}
+@media(max-width:820px){
+  .main-area{margin-right:0;width:100%}
+  .topbar-context{display:none}
+  .page-content{padding:19px 14px 30px}
+  .page-head h1{font-size:24px}.page-head p{font-size:13px}
+  .polished-kpis .kpi span,.inventory-stats span{font-size:12px}
+  td{font-size:12.5px!important}th{font-size:11.5px!important}
+  .sale-items .empty-state,.purchase-items .empty-state{min-height:140px;margin:12px}
+  .polished-mechanic .mechanic-hero{padding:26px 14px 12px}.polished-mechanic .hero-copy h1{font-size:29px!important}.polished-mechanic .hero-copy p{font-size:12.5px!important}
+  .polished-mechanic .mechanic-results{padding:12px 14px 34px}.polished-mechanic .network-cards{grid-template-columns:1fr!important}
+  .network-title-row h2{font-size:15px!important}.network-card p{font-size:11px!important}
+}
+@media(max-width:520px){
+  .page-head h1{font-size:23px}.page-head p{font-size:12.5px}
+  .mobile-nav-item .nav-label{font-size:8px!important}
+  .polished-mechanic .hero-copy h1{font-size:27px!important}
+}

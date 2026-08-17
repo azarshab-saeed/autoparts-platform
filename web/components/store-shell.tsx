@@ -49,6 +49,8 @@ export default function StoreShell({children}:{children:React.ReactNode}){
 
   const visible=nav.filter(item=>!item.roles||item.roles.includes(session.role));
   const groups=(['عملیات','شبکه','مالی و کنترل'] as const);
+  const current=visible.find(item=>item.href!=="#"&&(path===item.href||(item.href!=="/store"&&path.startsWith(item.href+"/"))))||visible[0];
+  const CurrentIcon=current?.icon||HomeIcon;
   const renderItem=(item:NavItem,mobile=false)=>{
     const Icon=item.icon;
     const active=item.href!=="#"&&(path===item.href||(item.href!=="/store"&&path.startsWith(item.href+"/")));
@@ -71,7 +73,7 @@ export default function StoreShell({children}:{children:React.ReactNode}){
 
     <main className="main-area">
       <header className="topbar">
-        <div className="topbar-leading"><div className="mobile-brand"><span>ی</span><div><b>{session.storeName}</b><small>پنل فروشگاه</small></div></div><div className="global-search"><SearchIcon/><input aria-label="جست‌وجوی سراسری" placeholder="جست‌وجوی کالا، مشتری یا فاکتور..."/><kbd>⌘ K</kbd></div></div>
+        <div className="topbar-leading"><div className="mobile-brand"><span>ی</span><div><b>{session.storeName}</b><small>پنل فروشگاه</small></div></div><div className="topbar-context"><span className="topbar-context-icon"><CurrentIcon/></span><div><b>{current?.label||"پنل فروشگاه"}</b><small>{current?.group||"عملیات روزانه"}</small></div></div></div>
         <div className="topbar-actions"><Link className="top-sale-action" href="/store/sales">+ فروش جدید</Link><div className="top-user"><div><b>{session.displayName}</b><span>{roleLabel[session.role]||session.role}</span></div><div className="avatar">{session.displayName.slice(0,1)}</div></div></div>
       </header>
       <div className="page-content">{children}</div>
