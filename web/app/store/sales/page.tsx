@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { postSale, searchCustomers, searchProducts } from "@/lib/api";
 import { useAuth } from "@/components/auth-provider";
 import type { Customer, PaymentPart, Product, SaleItem } from "@/lib/types";
@@ -26,7 +27,7 @@ export default function SalesPage(){
  function choose(m:PayMode){setMethod(m); if(m!=="mixed"){setCashAmount(0);setCardAmount(0)}}
  function paymentParts():PaymentPart[]{if(method!=="mixed")return[];const parts:PaymentPart[]=[];if(cashAmount>0)parts.push({method:"cash",amount:cashAmount});if(cardAmount>0)parts.push({method:"card",amount:cardAmount});return parts}
  async function submit(){if(!session||!items.length)return;if(method==="mixed"&&cashAmount+cardAmount>total){setError("جمع پرداخت نقد و کارت از مبلغ فاکتور بیشتر است.");return}if(due>0&&!customer){setError("برای مانده نسیه باید مشتری انتخاب شود.");return}setBusy(true);setError("");setSuccess("");try{const legacy=method==="mixed"?"credit":method;const parts=method==="mixed"?paymentParts():undefined;const out=await postSale(session,items,customer?.id||null,legacy,parts);setSuccess(`فروش ثبت شد — ${money(out.total_amount)} تومان${out.due_amount?` | مانده ${money(out.due_amount)}`:""} — شناسه: ${out.id}`);setItems([]);setCustomer(null);setCashAmount(0);setCardAmount(0)}catch(e){setError(e instanceof Error?e.message:"ثبت فروش ناموفق بود")}finally{setBusy(false)}}
- return <><div className="page-head"><div><span className="eyebrow">صندوق فروش</span><h1>فروش جدید</h1><p>فروش نقد، کارت، نسیه یا ترکیبی را در یک مرحله ثبت کن.</p></div><div className="sale-number">فاکتور جدید</div></div>
+ return <><div className="page-head"><div><span className="eyebrow">صندوق فروش</span><h1>فروش جدید</h1><p>فروش نقد، کارت، نسیه یا ترکیبی را در یک مرحله ثبت کن.</p></div><div className="head-actions"><Link className="ghost-btn" href="/store/sales/history">تاریخچه فروش</Link><div className="sale-number">فاکتور جدید</div></div></div>
  {success&&<div className="success-box">{success}</div>}{error&&<div className="error-box page-error">{error}</div>}
  <div className="sale-layout"><section className="sale-main">
    <div className="search-card"><SearchIcon/><input autoFocus value={query} onChange={e=>setQuery(e.target.value)} placeholder="نام، کد، OEM یا بارکد کالا..."/>{query&&<div className="search-results">{results.slice(0,7).map(p=><button key={p.id} onClick={()=>add(p)}><div><b>{p.title}</b><span>{p.brand||"بدون برند"} · {p.sku||"بدون کد"}</span></div><div><strong>{money(p.mockPrice||0)}</strong><small>موجودی {p.mockQty??"—"}</small></div></button>)}</div>}</div>

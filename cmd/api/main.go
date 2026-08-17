@@ -16,6 +16,7 @@ import (
 	"github.com/example/autoparts-core/internal/finance"
 	"github.com/example/autoparts-core/internal/inventory"
 	"github.com/example/autoparts-core/internal/network"
+	"github.com/example/autoparts-core/internal/operations"
 	"github.com/example/autoparts-core/internal/platform/api"
 	"github.com/example/autoparts-core/internal/platform/auth"
 	"github.com/example/autoparts-core/internal/platform/db"
@@ -56,6 +57,7 @@ func main() {
 	financeSvc := finance.NewService(pool)
 	returnSvc := returnsvc.NewService(pool)
 	reservationSvc := reservations.NewService(pool)
+	operationsSvc := operations.NewService(pool)
 
 	public := http.NewServeMux()
 	protected := http.NewServeMux()
@@ -329,6 +331,66 @@ func main() {
 		api.WriteJSON(w, http.StatusOK, out)
 	})))
 
+	protected.Handle("GET /v1/dashboard", auth.RequireRoles("owner", "admin", "cashier", "warehouse", "accountant")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, _ := auth.ClaimsFrom(r.Context())
+		out, err := operationsSvc.Dashboard(r.Context(), c.TenantID, c.StoreID, time.Now())
+		if err != nil {
+			api.WriteError(w, api.Conflict("dashboard_failed", err.Error()))
+			return
+		}
+		api.WriteJSON(w, http.StatusOK, out)
+	})))
+
+	protected.Handle("GET /v1/sales", auth.RequireRoles("owner", "admin", "cashier", "accountant")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, _ := auth.ClaimsFrom(r.Context())
+		from, to, err := businessDateRange(r)
+		if err != nil {
+			api.WriteError(w, err)
+			return
+		}
+		limit, offset, err := pageParams(r)
+		if err != nil {
+			api.WriteError(w, err)
+			return
+		}
+		customerID, err := optionalUUIDQuery(r, "customer_id")
+		if err != nil {
+			api.WriteError(w, err)
+			return
+		}
+		items, total, err := operationsSvc.ListSales(r.Context(), c.TenantID, c.StoreID, from, to, customerID, r.URL.Query().Get("q"), r.URL.Query().Get("payment_state"), limit, offset)
+		if err != nil {
+			api.WriteError(w, api.BadRequest("sales_history_failed", err.Error()))
+			return
+		}
+		api.WriteJSON(w, http.StatusOK, pagedEnvelope(items, total, limit, offset))
+	})))
+
+	protected.Handle("GET /v1/purchases", auth.RequireRoles("owner", "admin", "warehouse", "accountant")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, _ := auth.ClaimsFrom(r.Context())
+		from, to, err := businessDateRange(r)
+		if err != nil {
+			api.WriteError(w, err)
+			return
+		}
+		limit, offset, err := pageParams(r)
+		if err != nil {
+			api.WriteError(w, err)
+			return
+		}
+		supplierID, err := optionalUUIDQuery(r, "supplier_id")
+		if err != nil {
+			api.WriteError(w, err)
+			return
+		}
+		items, total, err := operationsSvc.ListPurchases(r.Context(), c.TenantID, c.StoreID, from, to, supplierID, r.URL.Query().Get("q"), r.URL.Query().Get("payment_state"), limit, offset)
+		if err != nil {
+			api.WriteError(w, api.BadRequest("purchases_history_failed", err.Error()))
+			return
+		}
+		api.WriteJSON(w, http.StatusOK, pagedEnvelope(items, total, limit, offset))
+	})))
+
 	protected.Handle("GET /v1/expenses/categories", auth.RequireRoles("owner", "admin", "accountant")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		c, _ := auth.ClaimsFrom(r.Context())
 		out, err := financeSvc.ListExpenseCategories(r.Context(), c.TenantID)
@@ -400,6 +462,67 @@ func main() {
 		}
 		api.WriteJSON(w, http.StatusOK, out)
 	})))
+
+	protected.Handle("GET /v1/reports/inventory", auth.RequireRoles("owner", "admin", "warehouse", "accountant")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, _ := auth.ClaimsFrom(r.Context())
+		warehouseID, err := uuidFromQuery(r, "warehouse_id")
+		if err != nil {
+			api.WriteError(w, err)
+			return
+		}
+		limit, offset, err := pageParams(r)
+		if err != nil {
+			api.WriteError(w, err)
+			return
+		}
+		out, err := operationsSvc.InventoryInsights(r.Context(), c.TenantID, c.StoreID, warehouseID, r.URL.Query().Get("q"), r.URL.Query().Get("sort"), limit, offset)
+		if err != nil {
+			api.WriteError(w, api.BadRequest("inventory_report_failed", err.Error()))
+			return
+		}
+		response := map[string]any{"summary": out.Summary, "items": out.Items, "total": out.Total, "next_cursor": ""}
+		if offset+len(out.Items) < out.Total {
+			response["next_cursor"] = pagination.EncodeOffset(offset + len(out.Items))
+		}
+		api.WriteJSON(w, http.StatusOK, response)
+	})))
+
+	protected.Handle("GET /v1/reports/cash", auth.RequireRoles("owner", "admin", "cashier", "accountant")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, _ := auth.ClaimsFrom(r.Context())
+		date, err := businessDateParam(r, "date", time.Now())
+		if err != nil {
+			api.WriteError(w, err)
+			return
+		}
+		out, err := operationsSvc.CashReport(r.Context(), c.TenantID, c.StoreID, date)
+		if err != nil {
+			api.WriteError(w, api.Conflict("cash_report_failed", err.Error()))
+			return
+		}
+		api.WriteJSON(w, http.StatusOK, out)
+	})))
+
+	protected.Handle("POST /v1/daily-closings", auth.RequireRoles("owner", "admin", "cashier", "accountant")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, _ := auth.ClaimsFrom(r.Context())
+		var cmd operations.CloseDayCommand
+		if err := decodeJSON(r, &cmd); err != nil {
+			api.WriteError(w, err)
+			return
+		}
+		cmd.TenantID, cmd.StoreID, cmd.ActorUserID = c.TenantID, c.StoreID, c.UserID
+		cmd.IdempotencyKey = strings.TrimSpace(r.Header.Get("Idempotency-Key"))
+		if cmd.IdempotencyKey == "" {
+			api.WriteError(w, api.BadRequest("missing_idempotency_key", "Idempotency-Key header is required"))
+			return
+		}
+		out, err := operationsSvc.CloseDay(r.Context(), cmd)
+		if err != nil {
+			api.WriteError(w, api.Conflict("daily_closing_rejected", err.Error()))
+			return
+		}
+		api.WriteJSON(w, http.StatusCreated, out)
+	})))
+
 	protected.Handle("POST /v1/settlements/customer-receipts", auth.RequireRoles("owner", "admin", "cashier", "accountant")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		c, _ := auth.ClaimsFrom(r.Context())
 		var cmd finance.SettlementCommand
@@ -438,7 +561,7 @@ func main() {
 		}
 		api.WriteJSON(w, http.StatusCreated, out)
 	})))
-	protected.HandleFunc("GET /v1/sales/{id}", func(w http.ResponseWriter, r *http.Request) {
+	protected.Handle("GET /v1/sales/{id}", auth.RequireRoles("owner", "admin", "cashier", "accountant")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		c, _ := auth.ClaimsFrom(r.Context())
 		id, err := uuid.Parse(r.PathValue("id"))
 		if err != nil {
@@ -451,8 +574,8 @@ func main() {
 			return
 		}
 		api.WriteJSON(w, http.StatusOK, out)
-	})
-	protected.HandleFunc("GET /v1/purchases/{id}", func(w http.ResponseWriter, r *http.Request) {
+	})))
+	protected.Handle("GET /v1/purchases/{id}", auth.RequireRoles("owner", "admin", "warehouse", "accountant")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		c, _ := auth.ClaimsFrom(r.Context())
 		id, err := uuid.Parse(r.PathValue("id"))
 		if err != nil {
@@ -465,7 +588,7 @@ func main() {
 			return
 		}
 		api.WriteJSON(w, http.StatusOK, out)
-	})
+	})))
 	protected.Handle("POST /v1/returns/sales", auth.RequireRoles("owner", "admin", "cashier")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		c, _ := auth.ClaimsFrom(r.Context())
 		var cmd returnsvc.SaleReturnCommand
@@ -761,6 +884,38 @@ func pageParams(r *http.Request) (int, int, error) {
 		return 0, 0, api.BadRequest("invalid_cursor", err.Error())
 	}
 	return limit, offset, nil
+}
+
+func pagedEnvelope(items any, total, limit, offset int) map[string]any {
+	next := ""
+	if offset+limit < total {
+		next = pagination.EncodeOffset(offset + limit)
+	}
+	return map[string]any{"items": items, "total": total, "next_cursor": next}
+}
+
+func optionalUUIDQuery(r *http.Request, name string) (*uuid.UUID, error) {
+	raw := strings.TrimSpace(r.URL.Query().Get(name))
+	if raw == "" {
+		return nil, nil
+	}
+	id, err := uuid.Parse(raw)
+	if err != nil {
+		return nil, api.BadRequest("invalid_"+name, name+" must be a UUID")
+	}
+	return &id, nil
+}
+
+func businessDateParam(r *http.Request, name string, fallback time.Time) (time.Time, error) {
+	raw := strings.TrimSpace(r.URL.Query().Get(name))
+	if raw == "" {
+		return time.Date(fallback.Year(), fallback.Month(), fallback.Day(), 0, 0, 0, 0, fallback.Location()), nil
+	}
+	v, err := time.Parse("2006-01-02", raw)
+	if err != nil {
+		return time.Time{}, api.BadRequest("invalid_"+name, name+" must use YYYY-MM-DD")
+	}
+	return v, nil
 }
 
 func uuidFromQuery(r *http.Request, name string) (uuid.UUID, error) {

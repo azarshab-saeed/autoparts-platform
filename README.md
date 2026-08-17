@@ -1,10 +1,10 @@
 # Auto Parts Platform
 
-**Current milestone: Phase 10 — Accounting Completion**
+**Current milestone: Phase 11 — Store Operations & Reporting Hardening**
 
-The repository now contains a runnable store frontend, Keycloak authentication, Go API, PostgreSQL inventory/accounting core, purchases, sales, settlement/returns, cross-store search, inventory-backed reservations, atomic reservation fulfillment, operating expenses, party statements, and store-level profit/loss reporting. Monetary integer values use **Iranian toman** (`IRT` application code).
+The repository now contains a runnable store frontend, Keycloak authentication, Go API, PostgreSQL inventory/accounting core, purchases, sales, settlement/returns, cross-store search, inventory-backed reservations, atomic reservation fulfillment, operating expenses, party statements, profit/loss reporting, operational sale/purchase history, a live management dashboard, inventory health analytics, cash/card movement reporting, and daily closing snapshots. Monetary integer values use **Iranian toman** (`IRT` application code).
 
-See `PHASE_10_RUN.md` for the current upgrade/test flow and `RELEASE_NOTES_PHASE10.md` for implementation details.
+See `PHASE_11_RUN.md` for the current upgrade/test flow and `RELEASE_NOTES_PHASE11.md` for implementation details.
 
 ---
 
@@ -117,11 +117,17 @@ Do not delete a production database/volume to apply realm configuration changes.
 - `/login` - redirects authentication to Keycloak
 - `/store` - store dashboard
 - `/store/sales` - operational sale screen
+- `/store/sales/history` - paginated sale history, filters and CSV export
+- `/store/sales/{id}` - printable sale invoice
 - `/store/purchases` - purchase entry and receiving screen
+- `/store/purchases/history` - paginated purchase history, filters and CSV export
+- `/store/purchases/{id}` - printable purchase document
 - `/store/inventory` - inventory, low-stock, adjustment, and reorder-point screen
 - `/store/accounts` - customer/supplier balances, settlement, and account statements
 - `/store/expenses` - operating expense entry
 - `/store/reports` - store profit/loss reporting
+- `/store/reports/inventory` - inventory valuation, low-stock, velocity and dead-stock analysis
+- `/store/closing` - cash/card report and daily closing
 - `/store/returns` - sale/purchase returns
 - `/store/network` - publish stock/prices to the cross-store network
 - `/store/orders` - incoming mechanic reservations
@@ -173,3 +179,8 @@ Development mechanic login for a fresh realm:
 mechanic@example.com
 ChangeMe123!
 ```
+
+
+## Phase 11 store operations hardening
+
+Phase 11 turns the core transaction engine into a more complete daily store workflow. Sales and purchases now have paginated history APIs and printable document screens, the dashboard reads live backend metrics, inventory reporting exposes value/velocity/dead-stock signals, and cash/card movements can be reconciled into an idempotent daily closing snapshot. Late transactions after a close are not silently hidden: the cash report exposes `changed_after_close` so the operator can see that the saved snapshot no longer matches current activity. CSV exports are generated client-side from the authorized data already returned by the API.

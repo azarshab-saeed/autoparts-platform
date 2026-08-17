@@ -216,3 +216,120 @@ export type PartyStatement = {
   closing_balance: number;
   items: PartyStatementLine[];
 };
+
+export type PagedResult<T> = {
+  items: T[];
+  total: number;
+  next_cursor: string;
+};
+
+export type SaleHistoryItem = {
+  id: string;
+  customer_id?: string;
+  customer_name?: string;
+  total_amount: number;
+  paid_amount: number;
+  due_amount: number;
+  status: string;
+  created_at: string;
+  line_count: number;
+  total_qty: number;
+  network_source: boolean;
+};
+
+export type PurchaseHistoryItem = {
+  id: string;
+  supplier_id: string;
+  supplier_name: string;
+  total_amount: number;
+  paid_amount: number;
+  due_amount: number;
+  status: string;
+  created_at: string;
+  line_count: number;
+  total_qty: number;
+};
+
+export type DashboardDailyAmount = { date: string; amount: number };
+export type DashboardSummary = {
+  sales_today: number;
+  sales_returns_today: number;
+  net_sales_today: number;
+  gross_profit_today: number;
+  purchases_today: number;
+  receivables: number;
+  payables: number;
+  inventory_value: number;
+  open_reservations: number;
+  low_stock_count: number;
+  recent_sales: SaleHistoryItem[];
+  sales_last_seven_days: DashboardDailyAmount[];
+};
+
+export type InventoryInsightItem = {
+  product_id: string;
+  title: string;
+  sku?: string;
+  brand?: string;
+  on_hand: number;
+  reserved: number;
+  available: number;
+  avg_unit_cost: number;
+  inventory_value: number;
+  min_qty: number;
+  target_qty: number;
+  low_stock: boolean;
+  sold_qty_30d: number;
+  last_sale_at?: string;
+  days_since_sale?: number;
+  dead_stock: boolean;
+};
+
+export type InventoryInsightSummary = {
+  sku_count: number;
+  on_hand: number;
+  reserved: number;
+  inventory_value: number;
+  low_stock_count: number;
+  dead_stock_count: number;
+};
+
+export type InventoryInsightReport = {
+  summary: InventoryInsightSummary;
+  items: InventoryInsightItem[];
+  total: number;
+  next_cursor: string;
+};
+
+export type DailyClosing = {
+  id: string;
+  business_date: string;
+  opening_cash: number;
+  cash_in: number;
+  cash_out: number;
+  expected_cash: number;
+  actual_cash: number;
+  variance: number;
+  closed_by_user_id: string;
+  note?: string;
+  created_at: string;
+};
+
+export type CashReport = {
+  business_date: string;
+  sale_cash_in: number;
+  customer_receipt_cash_in: number;
+  purchase_return_cash_in: number;
+  cash_in: number;
+  purchase_cash_out: number;
+  supplier_payment_cash_out: number;
+  expense_cash_out: number;
+  sale_return_cash_out: number;
+  cash_out: number;
+  net_cash_movement: number;
+  card_in: number;
+  card_out: number;
+  net_card_movement: number;
+  closing?: DailyClosing;
+  changed_after_close: boolean;
+};

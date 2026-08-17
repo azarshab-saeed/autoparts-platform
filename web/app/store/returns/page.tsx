@@ -1,5 +1,5 @@
 "use client";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-provider";
 import { getPurchaseDetail, getSaleDetail, MOCK_MODE, postPurchaseReturn, postSaleReturn } from "@/lib/api";
 import type { PurchaseDetail, SaleDetail } from "@/lib/types";
@@ -10,6 +10,7 @@ const mockSale="99999999-9999-9999-9999-999999999991"; const mockPurchase="99999
 export default function ReturnsPage(){
  const {session}=useAuth();const[kind,setKind]=useState<Kind>("sale");const[id,setId]=useState("");const[doc,setDoc]=useState<SaleDetail|PurchaseDetail|null>(null);const[qty,setQty]=useState<Record<string,number>>({});const[refund,setRefund]=useState<Refund>("credit_balance");const[busy,setBusy]=useState(false);const[error,setError]=useState("");const[success,setSuccess]=useState("");
  const selectedTotal=useMemo(()=>doc?.items.reduce((s,x)=>s+(qty[x.id]||0)*(kind==="sale"?(x.unit_price||0):x.unit_cost),0)||0,[doc,qty,kind]);
+ useEffect(()=>{const searchParams=new URLSearchParams(window.location.search);const preset=searchParams.get("id");const presetKind=searchParams.get("kind");if(presetKind==="sale"||presetKind==="purchase")setKind(presetKind);if(preset)setId(preset)},[]);
  async function lookup(){if(!session||!id.trim())return;setBusy(true);setError("");setSuccess("");try{const out=kind==="sale"?await getSaleDetail(session,id.trim()):await getPurchaseDetail(session,id.trim());setDoc(out);setQty(Object.fromEntries(out.items.map(x=>[x.id,0])))}catch(e){setDoc(null);setError(e instanceof Error?e.message:"سند پیدا نشد")}finally{setBusy(false)}}
  async function submit(){if(!session||!doc)return;const items=doc.items.filter(x=>(qty[x.id]||0)>0).map(x=>({source_item_id:x.id,qty:qty[x.id]}));if(!items.length){setError("حداقل یک قلم برای مرجوعی انتخاب کن.");return}setBusy(true);setError("");try{const out=kind==="sale"?await postSaleReturn(session,doc.id,items,refund):await postPurchaseReturn(session,doc.id,items,refund);setSuccess(`مرجوعی ثبت شد — ${money(out.total_amount)} تومان — شناسه: ${out.id}`);const refreshed=kind==="sale"?await getSaleDetail(session,doc.id):await getPurchaseDetail(session,doc.id);setDoc(refreshed);setQty(Object.fromEntries(refreshed.items.map(x=>[x.id,0])))}catch(e){setError(e instanceof Error?e.message:"ثبت مرجوعی ناموفق بود")}finally{setBusy(false)}}
  function switchKind(v:Kind){setKind(v);setDoc(null);setQty({});setError("");setSuccess("");setId("")}

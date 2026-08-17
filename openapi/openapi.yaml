@@ -1,8 +1,8 @@
 openapi: 3.1.0
 info:
   title: Auto Parts Platform API
-  version: 0.10.0
-  description: Phase 10 contract. Adds operating expenses, automatic expense journals, store-level profit/loss reporting, and customer/supplier statements on top of reservation fulfillment. Monetary integer fields use Iranian toman (application currency code IRT).
+  version: 0.11.0
+  description: Phase 11 contract. Adds store operations history, live management dashboard, inventory analytics, CSV-friendly reporting, cash movement reporting, and daily closing snapshots. Monetary integer fields use Iranian toman (application currency code IRT).
 servers:
 - url: http://localhost:8080
 components:
@@ -464,6 +464,97 @@ components:
               category_code: {type: string}
               category_name: {type: string}
               amount: {type: integer}
+    SaleHistoryItem:
+      type: object
+      required: [id, total_amount, paid_amount, due_amount, status, created_at, line_count, total_qty, network_source]
+      properties:
+        id: {type: string, format: uuid}
+        customer_id: {type: [string, 'null'], format: uuid}
+        customer_name: {type: string}
+        total_amount: {type: integer}
+        paid_amount: {type: integer}
+        due_amount: {type: integer}
+        status: {type: string}
+        created_at: {type: string, format: date-time}
+        line_count: {type: integer}
+        total_qty: {type: number}
+        network_source: {type: boolean}
+    PurchaseHistoryItem:
+      type: object
+      required: [id, supplier_id, supplier_name, total_amount, paid_amount, due_amount, status, created_at, line_count, total_qty]
+      properties:
+        id: {type: string, format: uuid}
+        supplier_id: {type: string, format: uuid}
+        supplier_name: {type: string}
+        total_amount: {type: integer}
+        paid_amount: {type: integer}
+        due_amount: {type: integer}
+        status: {type: string}
+        created_at: {type: string, format: date-time}
+        line_count: {type: integer}
+        total_qty: {type: number}
+    DashboardSummary:
+      type: object
+      properties:
+        sales_today: {type: integer}
+        sales_returns_today: {type: integer}
+        net_sales_today: {type: integer}
+        gross_profit_today: {type: integer}
+        purchases_today: {type: integer}
+        receivables: {type: integer}
+        payables: {type: integer}
+        inventory_value: {type: integer}
+        open_reservations: {type: integer}
+        low_stock_count: {type: integer}
+        recent_sales: {type: array, items: {$ref: '#/components/schemas/SaleHistoryItem'}}
+        sales_last_seven_days:
+          type: array
+          items:
+            type: object
+            properties:
+              date: {type: string, format: date}
+              amount: {type: integer}
+    InventoryInsightItem:
+      type: object
+      properties:
+        product_id: {type: string, format: uuid}
+        title: {type: string}
+        sku: {type: string}
+        brand: {type: string}
+        on_hand: {type: number}
+        reserved: {type: number}
+        available: {type: number}
+        avg_unit_cost: {type: integer}
+        inventory_value: {type: integer}
+        min_qty: {type: number}
+        target_qty: {type: number}
+        low_stock: {type: boolean}
+        sold_qty_30d: {type: number}
+        last_sale_at: {type: string, format: date-time}
+        days_since_sale: {type: integer}
+        dead_stock: {type: boolean}
+    DailyClosingCreate:
+      type: object
+      required: [business_date, opening_cash, actual_cash]
+      properties:
+        business_date: {type: string, format: date}
+        opening_cash: {type: integer, minimum: 0}
+        actual_cash: {type: integer, minimum: 0}
+        note: {type: string}
+    DailyClosing:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        business_date: {type: string, format: date}
+        opening_cash: {type: integer}
+        cash_in: {type: integer}
+        cash_out: {type: integer}
+        expected_cash: {type: integer}
+        actual_cash: {type: integer}
+        variance: {type: integer}
+        closed_by_user_id: {type: string, format: uuid}
+        note: {type: string}
+        created_at: {type: string, format: date-time}
 paths:
   /healthz:
     get:
@@ -519,6 +610,21 @@ paths:
         '201':
           description: supplier created
   /v1/sales:
+    get:
+      description: Paginated store sales history with date, customer, text and payment-state filters.
+      security:
+      - keycloakOIDC: []
+      parameters:
+      - {in: query, name: from, schema: {type: string, format: date}}
+      - {in: query, name: to, schema: {type: string, format: date}}
+      - {in: query, name: q, schema: {type: string}}
+      - {in: query, name: customer_id, schema: {type: string, format: uuid}}
+      - {in: query, name: payment_state, schema: {type: string, enum: [all, paid, due]}}
+      - {in: query, name: cursor, schema: {type: string}}
+      - {in: query, name: limit, schema: {type: integer, minimum: 1, maximum: 100}}
+      responses:
+        '200':
+          description: Sales history page with items, total and next_cursor
     post:
       security:
       - keycloakOIDC: []
@@ -557,6 +663,21 @@ paths:
         '404':
           description: sale not found
   /v1/purchases:
+    get:
+      description: Paginated purchase history with supplier, date, text and payment-state filters.
+      security:
+      - keycloakOIDC: []
+      parameters:
+      - {in: query, name: from, schema: {type: string, format: date}}
+      - {in: query, name: to, schema: {type: string, format: date}}
+      - {in: query, name: q, schema: {type: string}}
+      - {in: query, name: supplier_id, schema: {type: string, format: uuid}}
+      - {in: query, name: payment_state, schema: {type: string, enum: [all, paid, due]}}
+      - {in: query, name: cursor, schema: {type: string}}
+      - {in: query, name: limit, schema: {type: integer, minimum: 1, maximum: 100}}
+      responses:
+        '200':
+          description: Purchase history page with items, total and next_cursor
     post:
       security:
       - keycloakOIDC: []
@@ -1024,3 +1145,58 @@ paths:
               schema:
                 $ref: '#/components/schemas/PartyStatement'
         '404': {description: Supplier not found in authenticated store}
+  /v1/dashboard:
+    get:
+      description: Live store management dashboard with today's operations, balances, inventory value, open reservations, recent sales and a seven-day sales series.
+      security:
+      - keycloakOIDC: []
+      responses:
+        '200':
+          description: Dashboard summary
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/DashboardSummary'}
+  /v1/reports/inventory:
+    get:
+      description: Inventory valuation and health report including low-stock, 30-day sold quantity, last sale, and 90-day dead-stock flags.
+      security:
+      - keycloakOIDC: []
+      parameters:
+      - {in: query, name: warehouse_id, required: true, schema: {type: string, format: uuid}}
+      - {in: query, name: q, schema: {type: string}}
+      - {in: query, name: sort, schema: {type: string, enum: [title, value, low_stock, sold_qty, dead_stock]}}
+      - {in: query, name: cursor, schema: {type: string}}
+      - {in: query, name: limit, schema: {type: integer, minimum: 1, maximum: 100}}
+      responses:
+        '200':
+          description: Inventory insight summary plus paginated items
+  /v1/reports/cash:
+    get:
+      description: Cash/card flow for one business date, with the saved daily-closing snapshot when present.
+      security:
+      - keycloakOIDC: []
+      parameters:
+      - {in: query, name: date, schema: {type: string, format: date}}
+      responses:
+        '200':
+          description: Cash and card movement report
+  /v1/daily-closings:
+    post:
+      description: Save an idempotent daily cash-closing snapshot. Late transactions are not blocked; subsequent cash reports expose changed_after_close.
+      security:
+      - keycloakOIDC: []
+      parameters:
+      - {in: header, name: Idempotency-Key, required: true, schema: {type: string}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/DailyClosingCreate'}
+      responses:
+        '201':
+          description: Daily closing saved
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/DailyClosing'}
+        '409': {description: Date already closed or business conflict}
+

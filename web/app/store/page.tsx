@@ -1,21 +1,19 @@
 "use client";
 import Link from "next/link";
-import { mockDashboard } from "@/lib/mock";
-
+import { useEffect,useMemo,useState } from "react";
+import { useAuth } from "@/components/auth-provider";
+import { getDashboardSummary } from "@/lib/api";
+import type { DashboardSummary } from "@/lib/types";
 const toman=(v:number)=>new Intl.NumberFormat("fa-IR").format(v)+" تومان";
-export default function Dashboard(){const d=mockDashboard;return <>
-  <div className="page-head"><div><span className="eyebrow">امروز</span><h1>داشبورد فروشگاه</h1><p>وضعیت امروز را در یک نگاه ببین.</p></div><div className="head-actions"><Link className="ghost-btn" href="/store/purchases">+ خرید جدید</Link><Link className="primary-btn" href="/store/sales">+ فروش جدید</Link></div></div>
-  <section className="kpi-grid">
-    <article className="kpi"><span>فروش امروز</span><strong>{toman(d.sales)}</strong><small className="up">۱۲٪ بیشتر از دیروز</small></article>
-    <article className="kpi"><span>سود تقریبی</span><strong>{toman(d.profit)}</strong><small>براساس بهای میانگین</small></article>
-    <article className="kpi"><span>خرید امروز</span><strong>{toman(d.purchases)}</strong><small>۳ سند خرید</small></article>
-    <article className="kpi"><span>طلب از مشتری‌ها</span><strong>{toman(d.receivables)}</strong><small>۱۸ حساب باز</small></article>
-    <article className="kpi"><span>بدهی به تأمین‌کننده</span><strong>{toman(d.payables)}</strong><small>۹ حساب باز</small></article>
-  </section>
-  <section className="dashboard-grid">
-    <article className="panel wide"><div className="panel-head"><div><h2>فروش‌های اخیر</h2><p>آخرین تراکنش‌های ثبت‌شده امروز</p></div><Link href="/store/sales">ثبت فروش</Link></div><div className="table-wrap"><table><thead><tr><th>شماره</th><th>مشتری</th><th>مبلغ</th><th>پرداخت</th><th>ساعت</th></tr></thead><tbody>{d.recentSales.map(s=><tr key={s.no}><td>{s.no}</td><td>{s.customer}</td><td>{toman(s.amount)}</td><td><span className="pill">{s.method}</span></td><td>{s.time}</td></tr>)}</tbody></table></div></article>
-    <article className="panel"><div className="panel-head"><div><h2>رو به اتمام</h2><p>کالاهایی که نیاز به توجه دارند</p></div><Link href="/store/inventory">مشاهده انبار</Link></div><div className="low-list">{d.lowStock.map(x=><div key={x.title}><div><b>{x.title}</b><span>موجودی فعلی</span></div><strong>{x.qty}</strong></div>)}</div></article>
-    <article className="panel wide"><div className="panel-head"><div><h2>فروش ۷ روز اخیر</h2><p>نمای ساده عملکرد فروشگاه</p></div></div><div className="bars">{[42,58,51,76,63,88,72].map((h,i)=><div key={i}><span style={{height:`${h}%`}}></span><small>{["ش","ی","د","س","چ","پ","ج"][i]}</small></div>)}</div></article>
-    <article className="panel quick-panel"><h2>کارهای سریع</h2><Link href="/store/sales">+ فروش جدید</Link><Link href="/store/purchases">+ خرید جدید</Link><Link href="/store/inventory">مدیریت انبار</Link><Link href="/store/accounts">دریافت / پرداخت</Link><Link href="/store/returns">مرجوعی</Link></article>
-  </section>
-</>}
+export default function Dashboard(){
+ const {session}=useAuth();const[data,setData]=useState<DashboardSummary|null>(null);const[error,setError]=useState("");
+ useEffect(()=>{if(!session)return;getDashboardSummary(session).then(setData).catch(e=>setError(e instanceof Error?e.message:"داشبورد دریافت نشد"))},[session]);
+ const max=useMemo(()=>Math.max(1,...(data?.sales_last_seven_days||[]).map(x=>x.amount)),[data]);
+ if(error)return <div className="error-box">{error}</div>;if(!data)return <div className="panel table-state">در حال آماده‌سازی داشبورد...</div>;
+ return <><div className="page-head"><div><span className="eyebrow">امروز</span><h1>داشبورد فروشگاه</h1><p>فروش، سود، حساب‌ها، موجودی و رزروهای باز در یک نگاه.</p></div><div className="head-actions"><Link className="ghost-btn" href="/store/purchases">+ خرید جدید</Link><Link className="primary-btn" href="/store/sales">+ فروش جدید</Link></div></div>
+ <section className="kpi-grid phase11-kpis"><article className="kpi"><span>فروش خالص امروز</span><strong>{toman(data.net_sales_today)}</strong><small>مرجوعی: {toman(data.sales_returns_today)}</small></article><article className="kpi"><span>سود ناخالص امروز</span><strong>{toman(data.gross_profit_today)}</strong><small>براساس بهای میانگین</small></article><article className="kpi"><span>خرید امروز</span><strong>{toman(data.purchases_today)}</strong><small><Link href="/store/purchases/history">مشاهده خریدها</Link></small></article><article className="kpi"><span>طلب مشتریان</span><strong>{toman(data.receivables)}</strong><small>مانده حساب باز</small></article><article className="kpi"><span>بدهی تأمین‌کنندگان</span><strong>{toman(data.payables)}</strong><small>مانده قابل پرداخت</small></article><article className="kpi"><span>ارزش موجودی</span><strong>{toman(data.inventory_value)}</strong><small>{data.low_stock_count} قلم کم‌موجود</small></article></section>
+ <section className="dashboard-grid"><article className="panel wide"><div className="panel-head"><div><h2>فروش‌های اخیر</h2><p>آخرین فاکتورهای ثبت‌شده</p></div><Link href="/store/sales/history">همه فروش‌ها</Link></div>{!data.recent_sales.length?<div className="table-state">هنوز فروشی ثبت نشده.</div>:<div className="table-wrap"><table><thead><tr><th>مشتری</th><th>مبلغ</th><th>مانده</th><th>زمان</th><th></th></tr></thead><tbody>{data.recent_sales.map(s=><tr key={s.id}><td>{s.customer_name||"مشتری نقدی"}{s.network_source&&<small className="block-note">فروش شبکه</small>}</td><td>{toman(s.total_amount)}</td><td>{s.due_amount?toman(s.due_amount):"تسویه"}</td><td>{new Date(s.created_at).toLocaleString("fa-IR")}</td><td><Link href={`/store/sales/${s.id}`}>جزئیات</Link></td></tr>)}</tbody></table></div>}</article>
+ <article className="panel attention-panel"><div className="panel-head"><div><h2>نیازمند توجه</h2><p>موارد عملیاتی باز</p></div></div><div className="attention-list"><Link href="/store/inventory"><span>کالاهای کم‌موجود</span><b>{data.low_stock_count}</b></Link><Link href="/store/orders"><span>رزروهای باز شبکه</span><b>{data.open_reservations}</b></Link><Link href="/store/closing"><span>کنترل صندوق روز</span><b>→</b></Link><Link href="/store/reports/inventory"><span>تحلیل ارزش انبار</span><b>→</b></Link></div></article>
+ <article className="panel wide"><div className="panel-head"><div><h2>فروش ۷ روز اخیر</h2><p>مبلغ فروش ثبت‌شده هر روز</p></div><Link href="/store/reports">سود و زیان</Link></div><div className="bars real-bars">{data.sales_last_seven_days.map(x=><div key={x.date} title={toman(x.amount)}><span style={{height:`${Math.max(5,Math.round(x.amount/max*100))}%`}}></span><small>{new Date(x.date+"T00:00:00").toLocaleDateString("fa-IR",{weekday:"short"})}</small></div>)}</div></article>
+ <article className="panel quick-panel"><h2>کارهای سریع</h2><Link href="/store/sales">+ فروش جدید</Link><Link href="/store/purchases">+ خرید جدید</Link><Link href="/store/sales/history">تاریخچه فروش</Link><Link href="/store/accounts">دریافت / پرداخت</Link><Link href="/store/closing">صندوق و بستن روز</Link></article></section></>;
+}

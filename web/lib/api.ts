@@ -1,4 +1,4 @@
-import { addMockExpense, addMockPartyBalance, applyMockAdjustment, applyMockPurchase, applyMockPurchaseReturn, applyMockReorder, applyMockSaleReturn, applyMockSettlement, getMockCustomerBalances, getMockExpenseCategories, getMockExpenses, getMockInventory, getMockPartyStatement, getMockProfitLoss, getMockSupplierBalances, mockCustomers, mockProducts, mockPurchaseDetail, mockSaleDetail, mockSuppliers, mockNetworkResults, getMockNetworkProfile, setMockNetworkProfile, getMockStoreOffers, setMockStoreOffer, createMockReservation, getMockBuyerReservations, getMockStoreReservations, cancelMockReservation, transitionMockReservation, fulfillMockReservation } from "./mock";
+import { addMockExpense, addMockPartyBalance, applyMockAdjustment, applyMockPurchase, applyMockPurchaseReturn, applyMockReorder, applyMockSaleReturn, applyMockSettlement, getMockCustomerBalances, getMockExpenseCategories, getMockExpenses, getMockInventory, getMockPartyStatement, getMockProfitLoss, getMockSupplierBalances, mockCustomers, mockProducts, mockPurchaseDetail, mockSaleDetail, mockSuppliers, mockNetworkResults, getMockNetworkProfile, setMockNetworkProfile, getMockStoreOffers, setMockStoreOffer, createMockReservation, getMockBuyerReservations, getMockStoreReservations, cancelMockReservation, transitionMockReservation, fulfillMockReservation, getMockDashboardSummary, getMockSalesHistory, getMockPurchasesHistory, getMockInventoryInsights, getMockCashReport, closeMockBusinessDay } from "./mock";
 import type {
   Customer,
   InventoryAdjustmentResult,
@@ -15,7 +15,7 @@ import type {
   SaleItem,
   SettlementResult,
   Supplier,
-  UserSession, NetworkSearchResult, NetworkStoreOffer, StoreNetworkProfile, NetworkReservation, NetworkReservationStatus, ReservationFulfillmentResult, Expense, ExpenseCategory, PartyStatement, ProfitLoss
+  UserSession, NetworkSearchResult, NetworkStoreOffer, StoreNetworkProfile, NetworkReservation, NetworkReservationStatus, ReservationFulfillmentResult, Expense, ExpenseCategory, PartyStatement, ProfitLoss, CashReport, DailyClosing, DashboardSummary, InventoryInsightReport, PagedResult, PurchaseHistoryItem, SaleHistoryItem
 } from "./types";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
@@ -248,4 +248,37 @@ export async function getProfitLoss(session:UserSession,from:string,to:string):P
 }
 export async function getPartyStatement(session:UserSession,type:"customer"|"supplier",id:string):Promise<PartyStatement>{
   if(MOCK_MODE)return getMockPartyStatement(type,id);const base=type==="customer"?"customers":"suppliers";return request<PartyStatement>(`/v1/accounts/${base}/${encodeURIComponent(id)}/statement`,{},session.token);
+}
+
+export async function getDashboardSummary(session:UserSession):Promise<DashboardSummary>{
+  if(MOCK_MODE)return getMockDashboardSummary();
+  return request<DashboardSummary>("/v1/dashboard",{},session.token);
+}
+
+export async function getSalesHistory(session:UserSession,opts:{from:string;to:string;q?:string;paymentState?:"all"|"paid"|"due";customerId?:string;cursor?:string;limit?:number}):Promise<PagedResult<SaleHistoryItem>>{
+  if(MOCK_MODE){const items=getMockSalesHistory(opts.q||"",opts.paymentState||"all");return{items,total:items.length,next_cursor:""};}
+  const p=new URLSearchParams({from:opts.from,to:opts.to,limit:String(opts.limit||50),payment_state:opts.paymentState||"all"});if(opts.q)p.set("q",opts.q);if(opts.customerId)p.set("customer_id",opts.customerId);if(opts.cursor)p.set("cursor",opts.cursor);
+  return request<PagedResult<SaleHistoryItem>>(`/v1/sales?${p.toString()}`,{},session.token);
+}
+
+export async function getPurchasesHistory(session:UserSession,opts:{from:string;to:string;q?:string;paymentState?:"all"|"paid"|"due";supplierId?:string;cursor?:string;limit?:number}):Promise<PagedResult<PurchaseHistoryItem>>{
+  if(MOCK_MODE){const items=getMockPurchasesHistory(opts.q||"",opts.paymentState||"all");return{items,total:items.length,next_cursor:""};}
+  const p=new URLSearchParams({from:opts.from,to:opts.to,limit:String(opts.limit||50),payment_state:opts.paymentState||"all"});if(opts.q)p.set("q",opts.q);if(opts.supplierId)p.set("supplier_id",opts.supplierId);if(opts.cursor)p.set("cursor",opts.cursor);
+  return request<PagedResult<PurchaseHistoryItem>>(`/v1/purchases?${p.toString()}`,{},session.token);
+}
+
+export async function getInventoryInsights(session:UserSession,opts:{q?:string;sort?:"title"|"value"|"low_stock"|"sold_qty"|"dead_stock";cursor?:string;limit?:number}={}):Promise<InventoryInsightReport>{
+  if(MOCK_MODE)return getMockInventoryInsights(opts.q||"",opts.sort||"title");
+  const p=new URLSearchParams({warehouse_id:session.warehouseId,limit:String(opts.limit||100),sort:opts.sort||"title"});if(opts.q)p.set("q",opts.q);if(opts.cursor)p.set("cursor",opts.cursor);
+  return request<InventoryInsightReport>(`/v1/reports/inventory?${p.toString()}`,{},session.token);
+}
+
+export async function getCashReport(session:UserSession,date:string):Promise<CashReport>{
+  if(MOCK_MODE)return getMockCashReport(date);
+  return request<CashReport>(`/v1/reports/cash?date=${encodeURIComponent(date)}`,{},session.token);
+}
+
+export async function closeBusinessDay(session:UserSession,input:{businessDate:string;openingCash:number;actualCash:number;note:string}):Promise<DailyClosing>{
+  if(MOCK_MODE)return closeMockBusinessDay(input);
+  return request<DailyClosing>("/v1/daily-closings",{method:"POST",headers:{"Idempotency-Key":crypto.randomUUID()},body:JSON.stringify({business_date:input.businessDate,opening_cash:input.openingCash,actual_cash:input.actualCash,note:input.note})},session.token);
 }

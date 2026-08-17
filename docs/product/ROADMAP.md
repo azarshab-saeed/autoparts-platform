@@ -84,15 +84,37 @@ Status: Completed
 - store-level profit/loss report
 - expense breakdown by category
 
-## Phase 11 - Migration & Onboarding
-- Excel import/mapping
-- legacy software adapters
-- guided store onboarding
+## Phase 11 - Store Operations & Reporting Hardening
+Status: Completed
+- paginated/filterable sales history
+- paginated/filterable purchase history
+- printable sale/purchase document screens
+- live management dashboard
+- inventory valuation, low-stock, velocity and 90-day dead-stock analytics
+- cash/card movement report
+- idempotent daily closing snapshot with variance
+- changed-after-close detection for late transactions
+- CSV-friendly exports
+- route-level role hardening for operational reports
 
-## Phase 12 - Hardening & Scale
-- observability
-- rate limiting
-- security review
-- load tests
-- backup/restore
-- tenancy isolation tests
+## Phase 12 - Network Procurement
+Status: Planned
+- store-to-store / supplier procurement requests
+- low-stock replenishment suggestions
+- procurement reservation/order lifecycle
+- supplier offer comparison
+
+## Phase 13 - Advanced Search & Fitment
+Status: Planned
+- vehicle-first fitment model
+- normalized OEM/cross-reference search
+- better ranking and compatibility confidence
+- search analytics and zero-result feedback
+
+## Phase 14 - Production Readiness & Onboarding
+Status: Planned
+- guided store onboarding and legacy import
+- observability and rate limiting
+- security review and tenancy isolation suite
+- load tests and backup/restore drills
+- deployment/operations runbooks
