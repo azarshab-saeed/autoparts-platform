@@ -9,6 +9,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -265,11 +266,13 @@ func localCORS(store *storeedge.Store, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		origin := strings.TrimSpace(r.Header.Get("Origin"))
 		if origin != "" {
-			allowed := false
-			for _, v := range store.Config().AllowedOrigins {
-				if v == origin {
-					allowed = true
-					break
+			allowed := sameLoopbackOrigin(origin, r.Host)
+			if !allowed {
+				for _, v := range store.Config().AllowedOrigins {
+					if v == origin {
+						allowed = true
+						break
+					}
 				}
 			}
 			if !allowed {
@@ -287,6 +290,19 @@ func localCORS(store *storeedge.Store, next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// sameLoopbackOrigin allows the Store Edge UI served by the agent itself to call
+// its local API. It deliberately requires the exact same host:port and a loopback
+// hostname, so another local web app on a different port cannot bypass the
+// configured origin allowlist.
+func sameLoopbackOrigin(origin, requestHost string) bool {
+	u, err := url.Parse(origin)
+	if err != nil || u.Scheme != "http" || u.Host == "" || u.Host != requestHost {
+		return false
+	}
+	host := strings.ToLower(u.Hostname())
+	return host == "localhost" || host == "127.0.0.1" || host == "::1"
 }
 
 func decodeJSON(r *http.Request, dst any) error {
