@@ -467,3 +467,31 @@ Actions:
 - accepted -> ready
 
 No `complete` action exists in Phase 8 because completion must post/attach an actual sale atomically.
+
+## Phase 10 — Expenses
+
+Route: `/store/expenses`
+
+- Date range and category filter.
+- Total expense KPI for the selected period.
+- Expense table: date, category, payment channel, note, amount.
+- `ثبت هزینه` modal: category, amount, date, cash/card, note.
+- User records the business action only; the debit/credit journal is automatic.
+
+## Phase 10 — Profit & Loss
+
+Route: `/store/reports`
+
+- Date range selector.
+- KPIs: net sales, gross profit, operating expenses, net operating profit.
+- Statement rows: gross sales, sales returns, net sales, COGS, reversed COGS, net COGS, gross profit, expenses, net profit.
+- Expense breakdown by category.
+
+## Phase 10 — Party Statement
+
+Route: `/store/accounts`
+
+- `گردش حساب` is available per customer/supplier.
+- Statement shows chronological ledger movements and running balance.
+- Positive customer balance means customer owes the store.
+- Positive supplier balance means store owes the supplier.

@@ -1,10 +1,10 @@
 # Auto Parts Platform
 
-**Current milestone: Phase 8 — Reservation + Mechanic Orders**
+**Current milestone: Phase 10 — Accounting Completion**
 
-The repository now contains a runnable store frontend, Keycloak authentication, Go API, PostgreSQL inventory/accounting core, purchases, sales, settlement/returns, cross-store network search, and inventory-backed mechanic reservations. Monetary integer values use **Iranian toman** (`IRT` application code).
+The repository now contains a runnable store frontend, Keycloak authentication, Go API, PostgreSQL inventory/accounting core, purchases, sales, settlement/returns, cross-store search, inventory-backed reservations, atomic reservation fulfillment, operating expenses, party statements, and store-level profit/loss reporting. Monetary integer values use **Iranian toman** (`IRT` application code).
 
-See `PHASE_8_RUN.md` for the current upgrade/test flow and `RELEASE_NOTES_PHASE8.md` for implementation details.
+See `PHASE_10_RUN.md` for the current upgrade/test flow and `RELEASE_NOTES_PHASE10.md` for implementation details.
 
 ---
 
@@ -119,7 +119,9 @@ Do not delete a production database/volume to apply realm configuration changes.
 - `/store/sales` - operational sale screen
 - `/store/purchases` - purchase entry and receiving screen
 - `/store/inventory` - inventory, low-stock, adjustment, and reorder-point screen
-- `/store/accounts` - customer/supplier balances and settlement
+- `/store/accounts` - customer/supplier balances, settlement, and account statements
+- `/store/expenses` - operating expense entry
+- `/store/reports` - store profit/loss reporting
 - `/store/returns` - sale/purchase returns
 - `/store/network` - publish stock/prices to the cross-store network
 - `/store/orders` - incoming mechanic reservations
@@ -157,9 +159,13 @@ GO_SUMDB=sum.golang.google.cn
 - `RELEASE_NOTES_PHASE5.md`
 
 
-## Phase 8 reservation boundary
+## Reservation and fulfillment boundary
 
-Reservations lock `inventory_balances.reserved` and therefore reduce public availability immediately. They do not post accounting entries and do not reduce `on_hand`. Store confirmation is a logistics state, not a financial sale. A later fulfillment slice should bind a reservation to the existing sale transaction atomically.
+Reservations lock `inventory_balances.reserved` and therefore reduce public availability immediately. Reservation creation/confirmation is still logistics-only. Phase 9 added atomic fulfillment: a `ready` reservation becomes a real posted sale exactly once, consuming both `on_hand` and the held `reserved` quantity while posting payment/AR, COGS, journals and outbox events in the same transaction.
+
+## Phase 10 accounting completion slice
+
+Operating expenses now post balanced journals automatically. The UI also exposes customer/supplier party-ledger statements and a store-level profit/loss report calculated from posted sales, sales returns, perpetual COGS and operating expenses.
 
 Development mechanic login for a fresh realm:
 

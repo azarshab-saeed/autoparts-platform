@@ -68,18 +68,28 @@ Status: Completed
 - mechanic/customer order tracking
 - cancellation and expiry release
 
-## Phase 9 - Accounting Completion
-- chart of accounts
-- expenses
-- bank/cash reconciliation
-- live dashboard/reporting
+## Phase 9 - Reservation Fulfillment
+Status: Completed
+- ready reservation -> posted sale atomically
+- held stock consumes both on_hand and reserved exactly once
+- cash/card/credit and partial payment reuse sale accounting
+- COGS, inventory, journal and outbox posting
+- fulfilled state and buyer/store UI
 
-## Phase 10 - Migration & Onboarding
+## Phase 10 - Accounting Completion
+Status: Completed
+- operating expenses with automatic balanced journals
+- default expense categories
+- customer/supplier party-ledger statements
+- store-level profit/loss report
+- expense breakdown by category
+
+## Phase 11 - Migration & Onboarding
 - Excel import/mapping
 - legacy software adapters
 - guided store onboarding
 
-## Phase 11 - Hardening & Scale
+## Phase 12 - Hardening & Scale
 - observability
 - rate limiting
 - security review

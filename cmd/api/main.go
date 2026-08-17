@@ -299,6 +299,107 @@ func main() {
 		}
 		api.WriteJSON(w, http.StatusOK, map[string]any{"items": out})
 	})
+
+	protected.Handle("GET /v1/accounts/customers/{id}/statement", auth.RequireRoles("owner", "admin", "cashier", "accountant")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, _ := auth.ClaimsFrom(r.Context())
+		id, err := uuid.Parse(r.PathValue("id"))
+		if err != nil {
+			api.WriteError(w, api.BadRequest("invalid_customer_id", "customer id must be a UUID"))
+			return
+		}
+		out, err := financeSvc.PartyStatement(r.Context(), c.TenantID, c.StoreID, "customer", id)
+		if err != nil {
+			api.WriteError(w, api.NotFound("customer_statement_not_found", err.Error()))
+			return
+		}
+		api.WriteJSON(w, http.StatusOK, out)
+	})))
+	protected.Handle("GET /v1/accounts/suppliers/{id}/statement", auth.RequireRoles("owner", "admin", "cashier", "accountant")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, _ := auth.ClaimsFrom(r.Context())
+		id, err := uuid.Parse(r.PathValue("id"))
+		if err != nil {
+			api.WriteError(w, api.BadRequest("invalid_supplier_id", "supplier id must be a UUID"))
+			return
+		}
+		out, err := financeSvc.PartyStatement(r.Context(), c.TenantID, c.StoreID, "supplier", id)
+		if err != nil {
+			api.WriteError(w, api.NotFound("supplier_statement_not_found", err.Error()))
+			return
+		}
+		api.WriteJSON(w, http.StatusOK, out)
+	})))
+
+	protected.Handle("GET /v1/expenses/categories", auth.RequireRoles("owner", "admin", "accountant")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, _ := auth.ClaimsFrom(r.Context())
+		out, err := financeSvc.ListExpenseCategories(r.Context(), c.TenantID)
+		if err != nil {
+			api.WriteError(w, api.Conflict("expense_categories_failed", err.Error()))
+			return
+		}
+		api.WriteJSON(w, http.StatusOK, map[string]any{"items": out})
+	})))
+	protected.Handle("GET /v1/expenses", auth.RequireRoles("owner", "admin", "accountant")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, _ := auth.ClaimsFrom(r.Context())
+		from, to, err := businessDateRange(r)
+		if err != nil {
+			api.WriteError(w, err)
+			return
+		}
+		limit, offset, err := pageParams(r)
+		if err != nil {
+			api.WriteError(w, err)
+			return
+		}
+		var categoryID *uuid.UUID
+		if raw := strings.TrimSpace(r.URL.Query().Get("category_id")); raw != "" {
+			id, parseErr := uuid.Parse(raw)
+			if parseErr != nil {
+				api.WriteError(w, api.BadRequest("invalid_category_id", "category_id must be a UUID"))
+				return
+			}
+			categoryID = &id
+		}
+		out, err := financeSvc.ListExpenses(r.Context(), c.TenantID, c.StoreID, from, to, categoryID, limit, offset)
+		if err != nil {
+			api.WriteError(w, api.Conflict("expenses_query_failed", err.Error()))
+			return
+		}
+		api.WriteJSON(w, http.StatusOK, map[string]any{"items": out})
+	})))
+	protected.Handle("POST /v1/expenses", auth.RequireRoles("owner", "admin", "accountant")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, _ := auth.ClaimsFrom(r.Context())
+		var cmd finance.ExpenseCommand
+		if err := decodeJSON(r, &cmd); err != nil {
+			api.WriteError(w, err)
+			return
+		}
+		cmd.TenantID, cmd.StoreID = c.TenantID, c.StoreID
+		cmd.IdempotencyKey = strings.TrimSpace(r.Header.Get("Idempotency-Key"))
+		if cmd.IdempotencyKey == "" {
+			api.WriteError(w, api.BadRequest("missing_idempotency_key", "Idempotency-Key header is required"))
+			return
+		}
+		out, err := financeSvc.CreateExpense(r.Context(), cmd)
+		if err != nil {
+			api.WriteError(w, api.Conflict("expense_rejected", err.Error()))
+			return
+		}
+		api.WriteJSON(w, http.StatusCreated, out)
+	})))
+	protected.Handle("GET /v1/reports/profit-loss", auth.RequireRoles("owner", "admin", "accountant")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, _ := auth.ClaimsFrom(r.Context())
+		from, to, err := businessDateRange(r)
+		if err != nil {
+			api.WriteError(w, err)
+			return
+		}
+		out, err := financeSvc.ProfitLoss(r.Context(), c.TenantID, c.StoreID, from, to)
+		if err != nil {
+			api.WriteError(w, api.Conflict("profit_loss_failed", err.Error()))
+			return
+		}
+		api.WriteJSON(w, http.StatusOK, out)
+	})))
 	protected.Handle("POST /v1/settlements/customer-receipts", auth.RequireRoles("owner", "admin", "cashier", "accountant")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		c, _ := auth.ClaimsFrom(r.Context())
 		var cmd finance.SettlementCommand
@@ -684,6 +785,35 @@ func optionalFloatQuery(r *http.Request, name string, min, max float64) (*float6
 		return nil, api.BadRequest("invalid_"+name, name+" is outside its valid range")
 	}
 	return &n, nil
+}
+
+func businessDateRange(r *http.Request) (time.Time, time.Time, error) {
+	now := time.Now()
+	defaultFrom := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.Local)
+	defaultTo := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.Local)
+	parse := func(name string, fallback time.Time) (time.Time, error) {
+		raw := strings.TrimSpace(r.URL.Query().Get(name))
+		if raw == "" {
+			return fallback, nil
+		}
+		v, err := time.Parse("2006-01-02", raw)
+		if err != nil {
+			return time.Time{}, api.BadRequest("invalid_"+name, name+" must use YYYY-MM-DD")
+		}
+		return v, nil
+	}
+	from, err := parse("from", defaultFrom)
+	if err != nil {
+		return time.Time{}, time.Time{}, err
+	}
+	to, err := parse("to", defaultTo)
+	if err != nil {
+		return time.Time{}, time.Time{}, err
+	}
+	if to.Before(from) {
+		return time.Time{}, time.Time{}, api.BadRequest("invalid_date_range", "to must not be before from")
+	}
+	return from, to, nil
 }
 
 func timeout(r *http.Request, d time.Duration) (context.Context, context.CancelFunc) {

@@ -1,8 +1,8 @@
 openapi: 3.1.0
 info:
   title: Auto Parts Platform API
-  version: 0.9.0
-  description: Phase 9 contract. Adds atomic reservation fulfillment into a posted Sale, consuming held inventory exactly once and posting payments, AR, COGS and journals. Monetary integer fields use Iranian toman (application currency code IRT).
+  version: 0.10.0
+  description: Phase 10 contract. Adds operating expenses, automatic expense journals, store-level profit/loss reporting, and customer/supplier statements on top of reservation fulfillment. Monetary integer fields use Iranian toman (application currency code IRT).
 servers:
 - url: http://localhost:8080
 components:
@@ -383,6 +383,87 @@ components:
         updated_at:
           type: string
           format: date-time
+    ExpenseCategory:
+      type: object
+      required: [id, code, name]
+      properties:
+        id: {type: string, format: uuid}
+        code: {type: string}
+        name: {type: string}
+    ExpenseCreate:
+      type: object
+      required: [category_id, method, amount]
+      properties:
+        category_id: {type: string, format: uuid}
+        method:
+          type: string
+          enum: [cash, card]
+        amount:
+          type: integer
+          minimum: 1
+        note: {type: string}
+        occurred_on:
+          type: string
+          format: date
+    Expense:
+      type: object
+      required: [id, category_id, category_code, category_name, method, amount, occurred_on, status]
+      properties:
+        id: {type: string, format: uuid}
+        category_id: {type: string, format: uuid}
+        category_code: {type: string}
+        category_name: {type: string}
+        method: {type: string, enum: [cash, card]}
+        amount: {type: integer}
+        note: {type: string}
+        occurred_on: {type: string, format: date}
+        created_at: {type: string, format: date-time}
+        status: {type: string, enum: [posted]}
+    PartyStatement:
+      type: object
+      required: [party_type, party_id, party_name, closing_balance, items]
+      properties:
+        party_type: {type: string, enum: [customer, supplier]}
+        party_id: {type: string, format: uuid}
+        party_name: {type: string}
+        closing_balance: {type: integer}
+        items:
+          type: array
+          items:
+            type: object
+            properties:
+              id: {type: string, format: uuid}
+              entry_type: {type: string}
+              reference_id: {type: string, format: uuid}
+              debit: {type: integer}
+              credit: {type: integer}
+              change: {type: integer}
+              balance: {type: integer}
+              created_at: {type: string, format: date-time}
+    ProfitLoss:
+      type: object
+      required: [from, to, gross_sales, sales_returns, net_sales, cogs, cogs_reversed, net_cogs, gross_profit, operating_expenses, net_profit, expense_breakdown]
+      properties:
+        from: {type: string, format: date}
+        to: {type: string, format: date}
+        gross_sales: {type: integer}
+        sales_returns: {type: integer}
+        net_sales: {type: integer}
+        cogs: {type: integer}
+        cogs_reversed: {type: integer}
+        net_cogs: {type: integer}
+        gross_profit: {type: integer}
+        operating_expenses: {type: integer}
+        net_profit: {type: integer}
+        expense_breakdown:
+          type: array
+          items:
+            type: object
+            properties:
+              category_id: {type: string, format: uuid}
+              category_code: {type: string}
+              category_name: {type: string}
+              amount: {type: integer}
 paths:
   /healthz:
     get:
@@ -858,3 +939,88 @@ paths:
           description: Reservation cancelled
         '409':
           description: Reservation cannot be cancelled
+  /v1/expenses/categories:
+    get:
+      description: List active default expense categories for the authenticated tenant.
+      security:
+      - keycloakOIDC: []
+      responses:
+        '200':
+          description: Expense category list
+  /v1/expenses:
+    get:
+      description: List store expenses for a date range. Defaults to the current month.
+      security:
+      - keycloakOIDC: []
+      parameters:
+      - {in: query, name: from, schema: {type: string, format: date}}
+      - {in: query, name: to, schema: {type: string, format: date}}
+      - {in: query, name: category_id, schema: {type: string, format: uuid}}
+      responses:
+        '200':
+          description: Expense list
+    post:
+      description: Post an operating expense and its balanced journal entry atomically.
+      security:
+      - keycloakOIDC: []
+      parameters:
+      - in: header
+        name: Idempotency-Key
+        required: true
+        schema: {type: string}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExpenseCreate'
+      responses:
+        '201':
+          description: Expense and accounting journal posted
+        '409':
+          description: Invalid category or business conflict
+  /v1/reports/profit-loss:
+    get:
+      description: Store-level operational profit and loss using posted sales, sales returns, perpetual COGS and operating expenses.
+      security:
+      - keycloakOIDC: []
+      parameters:
+      - {in: query, name: from, schema: {type: string, format: date}}
+      - {in: query, name: to, schema: {type: string, format: date}}
+      responses:
+        '200':
+          description: Profit and loss report
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProfitLoss'
+  /v1/accounts/customers/{id}/statement:
+    get:
+      description: Customer party-ledger statement and running balance.
+      security:
+      - keycloakOIDC: []
+      parameters:
+      - {in: path, name: id, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200':
+          description: Customer statement
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PartyStatement'
+        '404': {description: Customer not found in authenticated store}
+  /v1/accounts/suppliers/{id}/statement:
+    get:
+      description: Supplier party-ledger statement and running balance.
+      security:
+      - keycloakOIDC: []
+      parameters:
+      - {in: path, name: id, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200':
+          description: Supplier statement
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PartyStatement'
+        '404': {description: Supplier not found in authenticated store}

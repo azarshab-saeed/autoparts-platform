@@ -73,3 +73,12 @@ Navigation موبایل:
 - `/store/orders` — incoming network reservations.
 - owner/admin/cashier/warehouse can view and transition reservations.
 - accounting data remains outside the reservation workflow until fulfillment becomes a posted sale.
+
+## Phase 10 additions
+
+### Owner / Admin / Accountant
+- `/store/expenses` — ثبت و مشاهده هزینه‌های عملیاتی
+- `/store/reports` — سود و زیان فروشگاه
+- `/store/accounts` — مشاهده گردش حساب مشتری و تأمین‌کننده
+
+Expense/report navigation is hidden for cashier and warehouse roles. Party settlement/statement permissions remain role-checked in the API.

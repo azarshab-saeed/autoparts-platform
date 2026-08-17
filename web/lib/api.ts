@@ -1,4 +1,4 @@
-import { addMockPartyBalance, applyMockAdjustment, applyMockPurchase, applyMockPurchaseReturn, applyMockReorder, applyMockSaleReturn, applyMockSettlement, getMockCustomerBalances, getMockInventory, getMockSupplierBalances, mockCustomers, mockProducts, mockPurchaseDetail, mockSaleDetail, mockSuppliers, mockNetworkResults, getMockNetworkProfile, setMockNetworkProfile, getMockStoreOffers, setMockStoreOffer, createMockReservation, getMockBuyerReservations, getMockStoreReservations, cancelMockReservation, transitionMockReservation, fulfillMockReservation } from "./mock";
+import { addMockExpense, addMockPartyBalance, applyMockAdjustment, applyMockPurchase, applyMockPurchaseReturn, applyMockReorder, applyMockSaleReturn, applyMockSettlement, getMockCustomerBalances, getMockExpenseCategories, getMockExpenses, getMockInventory, getMockPartyStatement, getMockProfitLoss, getMockSupplierBalances, mockCustomers, mockProducts, mockPurchaseDetail, mockSaleDetail, mockSuppliers, mockNetworkResults, getMockNetworkProfile, setMockNetworkProfile, getMockStoreOffers, setMockStoreOffer, createMockReservation, getMockBuyerReservations, getMockStoreReservations, cancelMockReservation, transitionMockReservation, fulfillMockReservation } from "./mock";
 import type {
   Customer,
   InventoryAdjustmentResult,
@@ -15,7 +15,7 @@ import type {
   SaleItem,
   SettlementResult,
   Supplier,
-  UserSession, NetworkSearchResult, NetworkStoreOffer, StoreNetworkProfile, NetworkReservation, NetworkReservationStatus, ReservationFulfillmentResult
+  UserSession, NetworkSearchResult, NetworkStoreOffer, StoreNetworkProfile, NetworkReservation, NetworkReservationStatus, ReservationFulfillmentResult, Expense, ExpenseCategory, PartyStatement, ProfitLoss
 } from "./types";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
@@ -230,4 +230,22 @@ export async function fulfillStoreReservation(session:UserSession,id:string,paym
     headers:{"Idempotency-Key":crypto.randomUUID()},
     body:JSON.stringify({payment_method:paymentMethod,...(customerId?{customer_id:customerId}:{}),...(payments?{payments}:{})})
   },session.token);
+}
+
+export async function getExpenseCategories(session:UserSession):Promise<ExpenseCategory[]>{
+  if(MOCK_MODE)return getMockExpenseCategories();const out=await request<{items:ExpenseCategory[]}>("/v1/expenses/categories",{},session.token);return out.items;
+}
+export async function getExpenses(session:UserSession,from:string,to:string,categoryId=""):Promise<Expense[]>{
+  if(MOCK_MODE)return getMockExpenses().filter(x=>(!categoryId||x.category_id===categoryId)&&x.occurred_on>=from&&x.occurred_on<=to);
+  const p=new URLSearchParams({from,to,limit:"200"});if(categoryId)p.set("category_id",categoryId);const out=await request<{items:Expense[]}>(`/v1/expenses?${p.toString()}`,{},session.token);return out.items;
+}
+export async function postExpense(session:UserSession,input:{categoryId:string;amount:number;method:"cash"|"card";note:string;occurredOn:string}):Promise<Expense>{
+  if(MOCK_MODE){await new Promise(r=>setTimeout(r,220));return addMockExpense(input.categoryId,input.amount,input.method,input.note,input.occurredOn);}
+  return request<Expense>("/v1/expenses",{method:"POST",headers:{"Idempotency-Key":crypto.randomUUID()},body:JSON.stringify({category_id:input.categoryId,amount:input.amount,method:input.method,note:input.note,occurred_on:input.occurredOn})},session.token);
+}
+export async function getProfitLoss(session:UserSession,from:string,to:string):Promise<ProfitLoss>{
+  if(MOCK_MODE)return getMockProfitLoss(from,to);return request<ProfitLoss>(`/v1/reports/profit-loss?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`,{},session.token);
+}
+export async function getPartyStatement(session:UserSession,type:"customer"|"supplier",id:string):Promise<PartyStatement>{
+  if(MOCK_MODE)return getMockPartyStatement(type,id);const base=type==="customer"?"customers":"suppliers";return request<PartyStatement>(`/v1/accounts/${base}/${encodeURIComponent(id)}/statement`,{},session.token);
 }

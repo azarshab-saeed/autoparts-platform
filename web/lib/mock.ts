@@ -1,4 +1,4 @@
-import type { Customer, InventoryStock, NetworkReservation, NetworkReservationStatus, PartyBalance, Product, PurchaseDetail, SaleDetail, Supplier } from "./types";
+import type { Customer, Expense, ExpenseCategory, InventoryStock, NetworkReservation, NetworkReservationStatus, PartyBalance, PartyStatement, Product, ProfitLoss, PurchaseDetail, SaleDetail, Supplier } from "./types";
 
 export const mockProducts: Product[] = [
   { id: "11111111-1111-1111-1111-111111111111", sku: "BRK-206-TXT", title: "لنت جلو پژو ۲۰۶ تیپ ۵", brand: "Textar", oem_code: "4254.89", unit: "pcs", active: true, mockPrice: 1780000, mockQty: 8, mockUnitCost: 1350000 },
@@ -168,3 +168,36 @@ function releaseMockReservation(r:NetworkReservation){const offer=mockNetworkRes
 export function cancelMockReservation(id:string){const r=mockReservations.find(x=>x.id===id);if(!r)throw new Error("رزرو پیدا نشد.");if(!["pending","accepted"].includes(r.status))throw new Error("این رزرو قابل لغو نیست.");releaseMockReservation(r);r.status="cancelled";r.updated_at=new Date().toISOString();return {...r};}
 export function transitionMockReservation(id:string,status:NetworkReservationStatus){const r=mockReservations.find(x=>x.id===id);if(!r)throw new Error("رزرو پیدا نشد.");const ok=(status==="accepted"&&r.status==="pending")||(status==="ready"&&r.status==="accepted")||(status==="rejected"&&["pending","accepted"].includes(r.status));if(!ok)throw new Error("تغییر وضعیت مجاز نیست.");if(status==="rejected")releaseMockReservation(r);r.status=status;r.updated_at=new Date().toISOString();return {...r};}
 export function fulfillMockReservation(id:string){const r=mockReservations.find(x=>x.id===id);if(!r)throw new Error("رزرو پیدا نشد.");if(r.status==="fulfilled")return{reservation_id:r.id,sale_id:`mock-sale-${r.id}`,total_amount:r.total_amount,paid_amount:r.total_amount,due_amount:0,status:"posted"};if(r.status!=="ready")throw new Error("رزرو باید آماده تحویل باشد.");r.status="fulfilled";r.updated_at=new Date().toISOString();return{reservation_id:r.id,sale_id:`mock-sale-${r.id}`,total_amount:r.total_amount,paid_amount:r.total_amount,due_amount:0,status:"posted"};}
+
+export const mockExpenseCategories: ExpenseCategory[] = [
+  {id:"e1000000-0000-0000-0000-000000000001",code:"RENT",name:"اجاره"},
+  {id:"e1000000-0000-0000-0000-000000000002",code:"PAYROLL",name:"حقوق و دستمزد"},
+  {id:"e1000000-0000-0000-0000-000000000003",code:"UTILITIES",name:"آب، برق، گاز و اینترنت"},
+  {id:"e1000000-0000-0000-0000-000000000004",code:"TRANSPORT",name:"حمل و رفت‌وآمد"},
+  {id:"e1000000-0000-0000-0000-000000000005",code:"SUPPLIES",name:"ملزومات فروشگاه"},
+  {id:"e1000000-0000-0000-0000-000000000006",code:"MARKETING",name:"تبلیغات و بازاریابی"},
+  {id:"e1000000-0000-0000-0000-000000000007",code:"OTHER",name:"سایر هزینه‌ها"}
+];
+let mockExpenses: Expense[] = [
+  {id:"e2000000-0000-0000-0000-000000000001",category_id:mockExpenseCategories[0].id,category_code:"RENT",category_name:"اجاره",method:"card",amount:8500000,note:"اجاره ماه جاری",occurred_on:new Date().toISOString().slice(0,10),created_at:new Date().toISOString(),status:"posted"},
+  {id:"e2000000-0000-0000-0000-000000000002",category_id:mockExpenseCategories[4].id,category_code:"SUPPLIES",category_name:"ملزومات فروشگاه",method:"cash",amount:980000,note:"بسته‌بندی و مصرفی",occurred_on:new Date().toISOString().slice(0,10),created_at:new Date().toISOString(),status:"posted"}
+];
+export function getMockExpenseCategories(){return mockExpenseCategories.map(x=>({...x}));}
+export function getMockExpenses(){return mockExpenses.map(x=>({...x}));}
+export function addMockExpense(categoryId:string,amount:number,method:"cash"|"card",note:string,occurredOn:string){
+  const category=mockExpenseCategories.find(x=>x.id===categoryId);if(!category)throw new Error("دسته هزینه پیدا نشد.");if(amount<=0)throw new Error("مبلغ هزینه معتبر نیست.");
+  const x:Expense={id:crypto.randomUUID(),category_id:category.id,category_code:category.code,category_name:category.name,method,amount,note,occurred_on:occurredOn,created_at:new Date().toISOString(),status:"posted"};mockExpenses.unshift(x);return {...x};
+}
+export function getMockProfitLoss(from:string,to:string):ProfitLoss{
+  const operating=mockExpenses.reduce((sum,x)=>sum+x.amount,0);const grossSales=124500000;const salesReturns=4200000;const cogs=88700000;const cogsReversed=2950000;const netSales=grossSales-salesReturns;const netCogs=cogs-cogsReversed;const grossProfit=netSales-netCogs;
+  const expense_breakdown=mockExpenseCategories.map(c=>({category_id:c.id,category_code:c.code,category_name:c.name,amount:mockExpenses.filter(x=>x.category_id===c.id).reduce((sum,x)=>sum+x.amount,0)})).filter(x=>x.amount>0).sort((a,b)=>b.amount-a.amount);
+  return{from,to,gross_sales:grossSales,sales_returns:salesReturns,net_sales:netSales,cogs,cogs_reversed:cogsReversed,net_cogs:netCogs,gross_profit:grossProfit,operating_expenses:operating,net_profit:grossProfit-operating,expense_breakdown};
+}
+export function getMockPartyStatement(type:"customer"|"supplier",id:string):PartyStatement{
+  const src=type==="customer"?mockCustomerBalances:mockSupplierBalances;const row=src.find(x=>x.id===id);if(!row)throw new Error("حساب پیدا نشد.");
+  const first=Math.max(0,Math.round(row.balance*.65));const second=Math.max(0,row.balance-first);const now=Date.now();
+  return{party_type:type,party_id:id,party_name:row.name,closing_balance:row.balance,items:row.balance===0?[]:[
+    {id:crypto.randomUUID(),entry_type:type==="customer"?"sale":"purchase",reference_id:crypto.randomUUID(),debit:type==="customer"?first:0,credit:type==="supplier"?first:0,change:first,balance:first,created_at:new Date(now-86400000*8).toISOString()},
+    {id:crypto.randomUUID(),entry_type:type==="customer"?"sale":"purchase",reference_id:crypto.randomUUID(),debit:type==="customer"?second:0,credit:type==="supplier"?second:0,change:second,balance:row.balance,created_at:new Date(now-86400000*2).toISOString()}
+  ]};
+}

@@ -165,3 +165,54 @@ export type NetworkReservation = {
   created_at: string;
   updated_at: string;
 };
+
+export type ExpenseCategory = { id: string; code: string; name: string };
+export type Expense = {
+  id: string;
+  category_id: string;
+  category_code: string;
+  category_name: string;
+  method: "cash" | "card";
+  amount: number;
+  note?: string;
+  occurred_on: string;
+  created_at: string;
+  status: string;
+};
+export type ExpenseCategoryTotal = {
+  category_id: string;
+  category_code: string;
+  category_name: string;
+  amount: number;
+};
+export type ProfitLoss = {
+  from: string;
+  to: string;
+  gross_sales: number;
+  sales_returns: number;
+  net_sales: number;
+  cogs: number;
+  cogs_reversed: number;
+  net_cogs: number;
+  gross_profit: number;
+  operating_expenses: number;
+  net_profit: number;
+  expense_breakdown: ExpenseCategoryTotal[];
+};
+export type PartyStatementLine = {
+  id: string;
+  entry_type: string;
+  reference_id: string;
+  debit: number;
+  credit: number;
+  change: number;
+  balance: number;
+  created_at: string;
+};
+export type PartyStatement = {
+  party_type: "customer" | "supplier";
+  party_id: string;
+  party_name: string;
+  closing_balance: number;
+  items: PartyStatementLine[];
+};

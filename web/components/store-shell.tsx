@@ -11,10 +11,11 @@ const nav = [
   ["/store/purchases", "خرید", BoxIcon],
   ["/store/inventory", "انبار و کالاها", BoxIcon],
   ["/store/accounts", "حساب‌ها", UsersIcon],
+  ["/store/expenses", "هزینه‌ها", ChartIcon],
   ["/store/returns", "مرجوعی", CartIcon],
   ["/store/network", "شبکه قطعات", SearchIcon],
   ["/store/orders", "سفارش‌های شبکه", CartIcon],
-  ["#", "گزارش‌ها", ChartIcon],
+  ["/store/reports", "گزارش‌ها", ChartIcon],
   ["#", "تنظیمات", SettingsIcon]
 ] as const;
 
@@ -31,6 +32,7 @@ export default function StoreShell({children}:{children:React.ReactNode}){
     <aside className="sidebar">
       <div className="brand"><div className="brand-mark">ی</div><div><b>فروشگاه هوشمند</b><span>{session.storeName}</span></div></div>
       <nav>{nav.map(([href,label,Icon],i)=>{
+        if ((href==="/store/expenses"||href==="/store/reports") && !["owner","admin","accountant"].includes(session.role)) return null;
         const active=href!== "#" && (path===href || (href!=="/store" && path.startsWith(href+"/")));
         return <Link key={i} href={href} onClick={e=>{if(href==="#")e.preventDefault()}} className={active?"nav-item active":"nav-item"}><Icon/><span>{label}</span>{href==="#"&&<small>به‌زودی</small>}</Link>
       })}</nav>
