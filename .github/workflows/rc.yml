@@ -1,0 +1,74 @@
+name: rc-gate
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  unit-and-web:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+          cache: false
+      - name: RC static safety
+        run: ./ops/rc-static-check.sh
+      - name: Go tests
+        run: go test ./...
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Web dependencies
+        working-directory: web
+        run: npm install --no-audit --no-fund
+      - name: Web production build
+        working-directory: web
+        run: npm run build
+
+  compose-rc:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+          cache: false
+      - name: Build and start stack
+        env:
+          APP_VERSION: 0.15.0-rc.1
+          APP_COMMIT: ${{ github.sha }}
+        run: docker compose up -d --build
+      - name: Wait for readiness
+        run: |
+          for i in $(seq 1 90); do
+            if curl -fsS http://localhost:8080/readyz >/dev/null; then exit 0; fi
+            sleep 2
+          done
+          docker compose ps
+          docker compose logs --tail=160 api keycloak keycloak-sync keycloak-qa-sync
+          exit 1
+      - name: RC end-to-end smoke
+        run: go run ./cmd/rc-smoke
+      - name: Database invariants
+        run: ./ops/rc-db-check.sh
+      - name: Performance baseline
+        env:
+          RC_LOAD_REQUESTS: '100'
+          RC_LOAD_CONCURRENCY: '8'
+          RC_LOAD_MAX_P95_MS: '1000'
+        run: go run ./cmd/rc-load
+      - name: Compose logs on failure
+        if: failure()
+        run: docker compose logs --tail=220
+      - name: Stop stack
+        if: always()
+        run: docker compose down -v

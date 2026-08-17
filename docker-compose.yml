@@ -13,7 +13,6 @@ services:
       timeout: 3s
       retries: 20
     volumes:
-      # PostgreSQL 18+ official image defines its volume at /var/lib/postgresql.
       - autoparts_pg:/var/lib/postgresql
 
   db-prepare:
@@ -72,6 +71,21 @@ services:
         condition: service_started
     restart: "no"
 
+  keycloak-qa-sync:
+    image: ${KEYCLOAK_IMAGE:-keycloak/keycloak:26.7.0}
+    entrypoint: ["/bin/sh", "/opt/keycloak/sync-qa-client.sh"]
+    environment:
+      KEYCLOAK_SYNC_SERVER: http://keycloak:8080
+      KEYCLOAK_REALM: autoparts
+      KEYCLOAK_ADMIN_USERNAME: ${KEYCLOAK_ADMIN_USERNAME:-admin}
+      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin-change-me}
+    volumes:
+      - ./keycloak/sync-qa-client.sh:/opt/keycloak/sync-qa-client.sh:ro
+    depends_on:
+      keycloak-sync:
+        condition: service_completed_successfully
+    restart: "no"
+
   api:
     build:
       context: .
@@ -79,6 +93,9 @@ services:
       args:
         GOPROXY: "${GO_MODULE_PROXY:-https://proxy.golang.org|https://goproxy.cn|direct}"
         GOSUMDB: "${GO_SUMDB:-sum.golang.google.cn}"
+        VERSION: "${APP_VERSION:-0.15.0-rc.1}"
+        COMMIT: "${APP_COMMIT:-dev}"
+        BUILD_TIME: "${APP_BUILD_TIME:-unknown}"
     environment:
       DATABASE_URL: postgres://autoparts:${POSTGRES_PASSWORD:-autoparts}@postgres:5432/autoparts?sslmode=disable
       KEYCLOAK_ISSUER: http://localhost:8081/realms/autoparts
@@ -102,7 +119,7 @@ services:
         condition: service_healthy
       db-prepare:
         condition: service_completed_successfully
-      keycloak-sync:
+      keycloak-qa-sync:
         condition: service_completed_successfully
 
   web:

@@ -1,0 +1,22 @@
+{
+  "release": "0.15.0-rc.1",
+  "phase": 15,
+  "baseline_commit": "c4866a815f2a82955567cbacb7acc08154550338",
+  "baseline_message": "feat: harden platform for production operations",
+  "required_migration": "012_production_hardening.sql",
+  "postgres_image": "postgres:18.4",
+  "keycloak_image": "keycloak/keycloak:26.7.0",
+  "qa_client": "autoparts-qa",
+  "qa_client_scope": "development only",
+  "gate": [
+    "go test ./...",
+    "web npm production build",
+    "authenticated E2E smoke",
+    "tenant-isolation smoke",
+    "idempotency replay",
+    "reservation hold/release",
+    "procurement hold/release",
+    "database accounting/inventory invariants",
+    "network-search performance baseline"
+  ]
+}

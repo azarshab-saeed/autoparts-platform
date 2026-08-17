@@ -1,4 +1,4 @@
-.PHONY: deps fmt test build run compose-up compose-rebuild compose-down web-dev web-build auth-logs migrations prod-preflight prod-up prod-down backup
+.PHONY: rc-static-check deps fmt test build run compose-up compose-rebuild compose-down web-dev web-build auth-logs migrations prod-preflight prod-up prod-down backup rc-smoke rc-db-check rc-load rc-check
 
 deps:
 	go mod tidy
@@ -36,7 +36,6 @@ web-build:
 auth-logs:
 	docker compose logs -f keycloak
 
-
 migrations:
 	docker compose run --rm db-prepare
 
@@ -51,3 +50,18 @@ prod-down:
 
 backup:
 	COMPOSE_FILE=docker-compose.prod.yml ./ops/backup.sh
+
+rc-smoke:
+	go run ./cmd/rc-smoke
+
+rc-static-check:
+	./ops/rc-static-check.sh
+
+rc-db-check:
+	./ops/rc-db-check.sh
+
+rc-load:
+	go run ./cmd/rc-load
+
+rc-check:
+	./ops/rc-check.sh

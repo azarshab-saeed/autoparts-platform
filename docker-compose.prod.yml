@@ -81,7 +81,7 @@ services:
       args:
         GOPROXY: "${GO_MODULE_PROXY:-https://proxy.golang.org|https://goproxy.cn|direct}"
         GOSUMDB: "${GO_SUMDB:-sum.golang.google.cn}"
-        VERSION: "${APP_VERSION:-0.14.0}"
+        VERSION: "${APP_VERSION:-0.15.0-rc.1}"
         COMMIT: "${APP_COMMIT:-unknown}"
         BUILD_TIME: "${APP_BUILD_TIME:-unknown}"
     restart: unless-stopped
