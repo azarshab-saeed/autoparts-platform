@@ -130,7 +130,15 @@ sync_mapper() {
   json_file="$3"
   mid="$(mapper_id "$client_uuid_value" "$mapper_name")"
   if [ -n "$mid" ]; then
-    "$KCADM" update "clients/$client_uuid_value/protocol-mappers/models/$mid" -r "$REALM" -f "$json_file" >/dev/null
+    # Keycloak 26.x requires ProtocolMapperRepresentation.id in the update body
+    # as well as in the request path. The import JSON intentionally has no id,
+    # so build a temporary update representation that includes the existing id.
+    update_file="/tmp/keycloak-sync-mapper-$mid.json"
+    {
+      printf '{\n  "id": "%s",\n' "$mid"
+      sed '1d' "$json_file"
+    } >"$update_file"
+    "$KCADM" update "clients/$client_uuid_value/protocol-mappers/models/$mid" -r "$REALM" -f "$update_file" >/dev/null
   else
     log "creating protocol mapper: $mapper_name"
     "$KCADM" create "clients/$client_uuid_value/protocol-mappers/models" -r "$REALM" -f "$json_file" >/dev/null
