@@ -15,6 +15,7 @@ const nav = [
   ["/store/closing", "صندوق و بستن روز", ChartIcon],
   ["/store/returns", "مرجوعی", CartIcon],
   ["/store/network", "شبکه قطعات", SearchIcon],
+  ["/store/procurement", "تأمین از شبکه", BoxIcon],
   ["/store/orders", "سفارش‌های شبکه", CartIcon],
   ["/store/reports", "گزارش‌ها", ChartIcon],
   ["#", "تنظیمات", SettingsIcon]

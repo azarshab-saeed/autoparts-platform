@@ -39,7 +39,7 @@ func (s *Service) ListSales(ctx context.Context, tenantID, storeID uuid.UUID, fr
 		SELECT s.id,s.customer_id,COALESCE(c.name,''),s.total_amount,s.paid_amount,s.due_amount,s.status,s.created_at,
 		       (SELECT COUNT(*)::int FROM sale_items si WHERE si.tenant_id=s.tenant_id AND si.sale_id=s.id),
 		       COALESCE((SELECT SUM(si.qty)::float8 FROM sale_items si WHERE si.tenant_id=s.tenant_id AND si.sale_id=s.id),0),
-		       EXISTS(SELECT 1 FROM network_reservations nr WHERE nr.tenant_id=s.tenant_id AND nr.store_id=s.store_id AND nr.sale_id=s.id),
+		       (EXISTS(SELECT 1 FROM network_reservations nr WHERE nr.tenant_id=s.tenant_id AND nr.store_id=s.store_id AND nr.sale_id=s.id) OR EXISTS(SELECT 1 FROM network_procurements np WHERE np.seller_tenant_id=s.tenant_id AND np.seller_store_id=s.store_id AND np.seller_sale_id=s.id)),
 		       COUNT(*) OVER()::int
 		FROM sales s
 		LEFT JOIN customers c ON c.id=s.customer_id AND c.tenant_id=s.tenant_id AND c.store_id=s.store_id
@@ -153,7 +153,7 @@ func (s *Service) Dashboard(ctx context.Context, tenantID, storeID uuid.UUID, no
 	if err := s.db.QueryRow(ctx, `SELECT COUNT(*)::int FROM inventory_balances ib JOIN warehouses w ON w.id=ib.warehouse_id AND w.tenant_id=ib.tenant_id LEFT JOIN inventory_reorder_points rp ON rp.tenant_id=ib.tenant_id AND rp.warehouse_id=ib.warehouse_id AND rp.product_id=ib.product_id WHERE ib.tenant_id=$1 AND w.store_id=$2 AND COALESCE(rp.min_qty,0)>0 AND (ib.on_hand-ib.reserved)<=rp.min_qty`, tenantID, storeID).Scan(&out.LowStockCount); err != nil {
 		return out, err
 	}
-	rows, err := s.db.Query(ctx, `SELECT s.id,s.customer_id,COALESCE(c.name,''),s.total_amount,s.paid_amount,s.due_amount,s.status,s.created_at,(SELECT COUNT(*)::int FROM sale_items si WHERE si.tenant_id=s.tenant_id AND si.sale_id=s.id),COALESCE((SELECT SUM(si.qty)::float8 FROM sale_items si WHERE si.tenant_id=s.tenant_id AND si.sale_id=s.id),0),EXISTS(SELECT 1 FROM network_reservations nr WHERE nr.sale_id=s.id AND nr.tenant_id=s.tenant_id) FROM sales s LEFT JOIN customers c ON c.id=s.customer_id AND c.tenant_id=s.tenant_id WHERE s.tenant_id=$1 AND s.store_id=$2 ORDER BY s.created_at DESC LIMIT 5`, tenantID, storeID)
+	rows, err := s.db.Query(ctx, `SELECT s.id,s.customer_id,COALESCE(c.name,''),s.total_amount,s.paid_amount,s.due_amount,s.status,s.created_at,(SELECT COUNT(*)::int FROM sale_items si WHERE si.tenant_id=s.tenant_id AND si.sale_id=s.id),COALESCE((SELECT SUM(si.qty)::float8 FROM sale_items si WHERE si.tenant_id=s.tenant_id AND si.sale_id=s.id),0),(EXISTS(SELECT 1 FROM network_reservations nr WHERE nr.sale_id=s.id AND nr.tenant_id=s.tenant_id) OR EXISTS(SELECT 1 FROM network_procurements np WHERE np.seller_sale_id=s.id AND np.seller_tenant_id=s.tenant_id)) FROM sales s LEFT JOIN customers c ON c.id=s.customer_id AND c.tenant_id=s.tenant_id WHERE s.tenant_id=$1 AND s.store_id=$2 ORDER BY s.created_at DESC LIMIT 5`, tenantID, storeID)
 	if err != nil {
 		return out, err
 	}

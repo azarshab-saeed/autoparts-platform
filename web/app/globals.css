@@ -39,3 +39,9 @@
 @media(max-width:1200px){.phase11-kpis{grid-template-columns:repeat(3,minmax(0,1fr))}.cash-flow-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.closing-grid{grid-template-columns:1fr}}
 @media(max-width:720px){.phase11-kpis,.cash-flow-grid,.invoice-meta{grid-template-columns:1fr}.operations-filter{align-items:stretch}.report-head-actions{align-items:stretch}.printable-invoice{padding:14px}.invoice-header{flex-direction:column}.invoice-header>div:last-child{align-items:flex-start}}
 @media print{.sidebar,.topbar,.no-print{display:none!important}.app-shell,.main-area,.page-content{display:block!important;margin:0!important;padding:0!important;background:#fff!important}.printable-invoice{border:0!important;box-shadow:none!important}.invoice-page{max-width:none}.printable-invoice *{color:#000!important}.table-wrap{overflow:visible!important}}
+
+
+/* Phase 12 — network procurement */
+.network-offers-panel .network-offer-row{grid-template-columns:minmax(220px,1fr) 80px 190px 65px 65px 90px 70px}.procurement-offer-row{grid-template-columns:minmax(220px,1fr) 90px 180px 120px 120px!important}.reservation-status.requested{background:#fff4dd;color:#9a6500}.reservation-status.received{background:#e8f8ef;color:#16805a}.reservation-status.cancelled,.reservation-status.expired,.reservation-status.rejected{background:#f4f5f7;color:#737f8d}
+@media(max-width:1000px){.network-offers-panel .network-offer-row,.procurement-offer-row{grid-template-columns:1fr 90px 160px!important}.procurement-offer-row .primary-btn{grid-column:auto}.network-offers-panel .offer-toggle,.network-offers-panel .table-action{grid-row:auto}}
+@media(max-width:700px){.network-offers-panel .network-offer-row,.procurement-offer-row{grid-template-columns:1fr!important;align-items:stretch}.offer-stock{text-align:right}.procurement-offer-row .offer-price{width:100%}}

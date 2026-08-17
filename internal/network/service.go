@@ -35,7 +35,7 @@ func (s *Service) Search(ctx context.Context, q string, lat, lng *float64, order
 		SELECT o.id,p.id,p.title,COALESCE(p.sku,''),COALESCE(p.brand,''),COALESCE(p.oem_code,''),
 		       s.id,s.name,COALESCE(s.city,''),COALESCE(s.public_address,''),COALESCE(s.public_phone,''),
 		       s.latitude::float8,s.longitude::float8,o.selling_price,
-		       (ib.on_hand-ib.reserved)::float8,o.allow_reservation,
+		       (ib.on_hand-ib.reserved)::float8,o.allow_reservation,o.allow_procurement,
 		       GREATEST(ib.updated_at,o.last_verified_at) AS last_updated_at
 		FROM store_product_offers o
 		JOIN stores s ON s.id=o.store_id AND s.tenant_id=o.tenant_id
@@ -64,7 +64,7 @@ func (s *Service) Search(ctx context.Context, q string, lat, lng *float64, order
 		var c candidate
 		if err := rows.Scan(&c.OfferID, &c.ProductID, &c.Title, &c.SKU, &c.Brand, &c.OEMCode,
 			&c.StoreID, &c.StoreName, &c.City, &c.Address, &c.Phone, &c.lat, &c.lng, &c.SellingPrice,
-			&c.Available, &c.AllowReservation, &c.LastUpdatedAt); err != nil {
+			&c.Available, &c.AllowReservation, &c.AllowProcurement, &c.LastUpdatedAt); err != nil {
 			return nil, err
 		}
 		age := now.Sub(c.LastUpdatedAt)
@@ -139,11 +139,36 @@ func (s *Service) Search(ctx context.Context, q string, lat, lng *float64, order
 	return out, nil
 }
 
+func (s *Service) SearchProcurement(ctx context.Context, buyerStoreID uuid.UUID, q string, lat, lng *float64, order string, limit int) ([]SearchResult, error) {
+	if buyerStoreID == uuid.Nil {
+		return nil, errors.New("buyer store is required")
+	}
+	want := limit
+	if want < 1 || want > 100 {
+		want = 30
+	}
+	items, err := s.Search(ctx, q, lat, lng, order, 100)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]SearchResult, 0, want)
+	for _, item := range items {
+		if item.StoreID == buyerStoreID || !item.AllowProcurement {
+			continue
+		}
+		out = append(out, item)
+		if len(out) == want {
+			break
+		}
+	}
+	return out, nil
+}
+
 func (s *Service) ListStoreOffers(ctx context.Context, tenantID, storeID, warehouseID uuid.UUID) ([]StoreOffer, error) {
 	rows, err := s.db.Query(ctx, `
 		SELECT p.id,p.title,COALESCE(p.sku,''),COALESCE(p.brand,''),
 		       ib.on_hand::float8,ib.reserved::float8,(ib.on_hand-ib.reserved)::float8,
-		       COALESCE(o.selling_price,0),COALESCE(o.visible,false),COALESCE(o.allow_reservation,false),
+		       COALESCE(o.selling_price,0),COALESCE(o.visible,false),COALESCE(o.allow_reservation,false),COALESCE(o.allow_procurement,false),
 		       COALESCE(o.last_verified_at,ib.updated_at)
 		FROM inventory_balances ib
 		JOIN warehouses w ON w.id=ib.warehouse_id AND w.tenant_id=ib.tenant_id AND w.store_id=$2
@@ -158,7 +183,7 @@ func (s *Service) ListStoreOffers(ctx context.Context, tenantID, storeID, wareho
 	var out []StoreOffer
 	for rows.Next() {
 		var x StoreOffer
-		if err := rows.Scan(&x.ProductID, &x.Title, &x.SKU, &x.Brand, &x.OnHand, &x.Reserved, &x.Available, &x.SellingPrice, &x.Visible, &x.AllowReservation, &x.LastVerifiedAt); err != nil {
+		if err := rows.Scan(&x.ProductID, &x.Title, &x.SKU, &x.Brand, &x.OnHand, &x.Reserved, &x.Available, &x.SellingPrice, &x.Visible, &x.AllowReservation, &x.AllowProcurement, &x.LastVerifiedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, x)
@@ -187,11 +212,11 @@ func (s *Service) UpsertOffer(ctx context.Context, tenantID, storeID, productID 
 		return errors.New("product does not belong to tenant")
 	}
 	_, err := s.db.Exec(ctx, `
-		INSERT INTO store_product_offers(tenant_id,store_id,warehouse_id,product_id,selling_price,visible,allow_reservation,last_verified_at)
-		VALUES($1,$2,$3,$4,$5,$6,$7,now())
+		INSERT INTO store_product_offers(tenant_id,store_id,warehouse_id,product_id,selling_price,visible,allow_reservation,allow_procurement,last_verified_at)
+		VALUES($1,$2,$3,$4,$5,$6,$7,$8,now())
 		ON CONFLICT(tenant_id,store_id,warehouse_id,product_id)
-		DO UPDATE SET selling_price=EXCLUDED.selling_price,visible=EXCLUDED.visible,allow_reservation=EXCLUDED.allow_reservation,last_verified_at=now(),updated_at=now()`,
-		tenantID, storeID, in.WarehouseID, productID, in.SellingPrice, in.Visible, in.AllowReservation)
+		DO UPDATE SET selling_price=EXCLUDED.selling_price,visible=EXCLUDED.visible,allow_reservation=EXCLUDED.allow_reservation,allow_procurement=EXCLUDED.allow_procurement,last_verified_at=now(),updated_at=now()`,
+		tenantID, storeID, in.WarehouseID, productID, in.SellingPrice, in.Visible, in.AllowReservation, in.AllowProcurement)
 	return err
 }
 

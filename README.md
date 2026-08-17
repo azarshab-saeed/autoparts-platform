@@ -130,6 +130,7 @@ Do not delete a production database/volume to apply realm configuration changes.
 - `/store/closing` - cash/card report and daily closing
 - `/store/returns` - sale/purchase returns
 - `/store/network` - publish stock/prices to the cross-store network
+- `/store/procurement` - store-to-store network procurement, seller workflow, and receiving
 - `/store/orders` - incoming mechanic reservations
 - `/mechanic` - public network search
 - `/mechanic/orders` - authenticated mechanic/consumer reservation tracking
@@ -184,3 +185,8 @@ ChangeMe123!
 ## Phase 11 store operations hardening
 
 Phase 11 turns the core transaction engine into a more complete daily store workflow. Sales and purchases now have paginated history APIs and printable document screens, the dashboard reads live backend metrics, inventory reporting exposes value/velocity/dead-stock signals, and cash/card movements can be reconciled into an idempotent daily closing snapshot. Late transactions after a close are not silently hidden: the cash report exposes `changed_after_close` so the operator can see that the saved snapshot no longer matches current activity. CSV exports are generated client-side from the authorized data already returned by the API.
+
+
+## Phase 12 network procurement
+
+Stores can now procure inventory directly from other network-enabled stores. Creating a procurement request immediately holds seller inventory; the seller accepts and marks it ready; the buyer then receives it. Receive is a single SERIALIZABLE cross-tenant transaction that posts the seller credit sale/AR/COGS and buyer credit purchase/AP while moving inventory and preserving weighted-average valuation. Network counterpart customer/supplier records are linked automatically, and the procurement stores both document IDs for auditability.

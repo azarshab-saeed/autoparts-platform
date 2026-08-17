@@ -21,6 +21,7 @@ type SearchResult struct {
 	SellingPrice     int64     `json:"selling_price"`
 	Available        float64   `json:"available"`
 	AllowReservation bool      `json:"allow_reservation"`
+	AllowProcurement bool      `json:"allow_procurement"`
 	LastUpdatedAt    time.Time `json:"last_updated_at"`
 	Freshness        string    `json:"freshness"`
 	DistanceKM       *float64  `json:"distance_km,omitempty"`
@@ -37,6 +38,7 @@ type StoreOffer struct {
 	SellingPrice     int64     `json:"selling_price"`
 	Visible          bool      `json:"visible"`
 	AllowReservation bool      `json:"allow_reservation"`
+	AllowProcurement bool      `json:"allow_procurement"`
 	LastVerifiedAt   time.Time `json:"last_verified_at"`
 }
 
@@ -45,6 +47,7 @@ type UpdateOffer struct {
 	SellingPrice     int64     `json:"selling_price"`
 	Visible          bool      `json:"visible"`
 	AllowReservation bool      `json:"allow_reservation"`
+	AllowProcurement bool      `json:"allow_procurement"`
 }
 
 type StoreProfile struct {

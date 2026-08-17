@@ -1,8 +1,8 @@
 openapi: 3.1.0
 info:
   title: Auto Parts Platform API
-  version: 0.11.0
-  description: Phase 11 contract. Adds store operations history, live management dashboard, inventory analytics, CSV-friendly reporting, cash movement reporting, and daily closing snapshots. Monetary integer fields use Iranian toman (application currency code IRT).
+  version: 0.12.0
+  description: Phase 12 contract. Adds store-to-store network procurement with seller inventory holds, buyer/seller workflow, atomic receiving, linked sale/purchase documents, perpetual inventory, and double-entry accounting. Monetary integer fields use Iranian toman (application currency code IRT).
 servers:
 - url: http://localhost:8080
 components:
@@ -232,6 +232,7 @@ components:
       - selling_price
       - visible
       - allow_reservation
+      - allow_procurement
       properties:
         warehouse_id:
           type: string
@@ -242,6 +243,8 @@ components:
         visible:
           type: boolean
         allow_reservation:
+          type: boolean
+        allow_procurement:
           type: boolean
     NetworkStoreProfileUpdate:
       type: object
@@ -383,6 +386,57 @@ components:
         updated_at:
           type: string
           format: date-time
+    NetworkProcurementCreate:
+      type: object
+      required: [offer_id, buyer_product_id, warehouse_id, qty]
+      properties:
+        offer_id: {type: string, format: uuid}
+        buyer_product_id: {type: string, format: uuid}
+        warehouse_id: {type: string, format: uuid}
+        qty: {type: number, exclusiveMinimum: 0, maximum: 1000}
+    NetworkProcurementStatusUpdate:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [accepted, ready, rejected]
+    NetworkProcurement:
+      type: object
+      required: [id, buyer_store_id, buyer_store_name, buyer_warehouse_id, buyer_product_id, buyer_product_title, seller_store_id, seller_store_name, seller_warehouse_id, seller_product_id, seller_product_title, offer_id, qty, unit_price, total_amount, status, expires_at, created_at, updated_at]
+      properties:
+        id: {type: string, format: uuid}
+        buyer_store_id: {type: string, format: uuid}
+        buyer_store_name: {type: string}
+        buyer_warehouse_id: {type: string, format: uuid}
+        buyer_product_id: {type: string, format: uuid}
+        buyer_product_title: {type: string}
+        seller_store_id: {type: string, format: uuid}
+        seller_store_name: {type: string}
+        seller_warehouse_id: {type: string, format: uuid}
+        seller_product_id: {type: string, format: uuid}
+        seller_product_title: {type: string}
+        offer_id: {type: string, format: uuid}
+        qty: {type: number}
+        unit_price: {type: integer}
+        total_amount: {type: integer}
+        status:
+          type: string
+          enum: [requested, accepted, ready, received, rejected, cancelled, expired]
+        expires_at: {type: string, format: date-time}
+        seller_sale_id: {type: string, format: uuid}
+        buyer_purchase_id: {type: string, format: uuid}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+    ProcurementReceiveResult:
+      type: object
+      required: [procurement_id, seller_sale_id, buyer_purchase_id, total_amount, status]
+      properties:
+        procurement_id: {type: string, format: uuid}
+        seller_sale_id: {type: string, format: uuid}
+        buyer_purchase_id: {type: string, format: uuid}
+        total_amount: {type: integer}
+        status: {type: string, enum: [received]}
     ExpenseCategory:
       type: object
       required: [id, code, name]
@@ -940,6 +994,89 @@ paths:
       responses:
         '200':
           description: Network offer upserted and freshness confirmed
+  /v1/network/procurement/search:
+    get:
+      description: Search procurement-enabled offers for the authenticated store. The current store is excluded.
+      security:
+      - keycloakOIDC: []
+      parameters:
+      - {in: query, name: q, required: true, schema: {type: string, minLength: 2}}
+      - {in: query, name: sort, schema: {type: string, enum: [best, price, distance, fresh]}}
+      - {in: query, name: limit, schema: {type: integer, minimum: 1, maximum: 100}}
+      responses:
+        '200': {description: Procurement-enabled network offers}
+  /v1/network/procurements:
+    post:
+      description: Create a store-to-store procurement request and immediately hold seller inventory. Buyer product mapping is validated by SKU, OEM code, or normalized title.
+      security:
+      - keycloakOIDC: []
+      parameters:
+      - {in: header, name: Idempotency-Key, required: true, schema: {type: string}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/NetworkProcurementCreate'}
+      responses:
+        '201':
+          description: Procurement requested and seller inventory held
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/NetworkProcurement'}
+        '409': {description: Offer disabled, mapping mismatch, or insufficient availability}
+  /v1/network/procurements/buying:
+    get:
+      description: List procurement requests where the authenticated store is the buyer.
+      security:
+      - keycloakOIDC: []
+      responses:
+        '200': {description: Buyer procurement list}
+  /v1/network/procurements/selling:
+    get:
+      description: List procurement requests where the authenticated store is the seller.
+      security:
+      - keycloakOIDC: []
+      responses:
+        '200': {description: Seller procurement list}
+  /v1/network/procurements/{id}:
+    patch:
+      description: Seller-side transition requested->accepted, accepted->ready, or requested/accepted->rejected. Reject releases the inventory hold.
+      security:
+      - keycloakOIDC: []
+      parameters:
+      - {in: path, name: id, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/NetworkProcurementStatusUpdate'}
+      responses:
+        '200': {description: Procurement status changed}
+        '409': {description: Invalid transition or ownership conflict}
+  /v1/network/procurements/{id}/cancel:
+    post:
+      description: Buyer cancels an active procurement and releases seller inventory.
+      security:
+      - keycloakOIDC: []
+      parameters:
+      - {in: path, name: id, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: Procurement cancelled}
+  /v1/network/procurements/{id}/receive:
+    post:
+      description: Receive a ready procurement atomically. Consumes seller hold, posts seller credit sale and AR/COGS, posts buyer credit purchase and AP, applies weighted-average inventory cost, creates network counterparty records, and links both documents to the procurement.
+      security:
+      - keycloakOIDC: []
+      parameters:
+      - {in: path, name: id, required: true, schema: {type: string, format: uuid}}
+      - {in: header, name: Idempotency-Key, required: true, schema: {type: string}}
+      responses:
+        '201':
+          description: Procurement received and both accounting documents posted
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ProcurementReceiveResult'}
+        '409': {description: Order not ready/expired or inventory invariant failed}
   /v1/network/reservations:
     post:
       description: Create an inventory-backed reservation. mechanic/consumer only. Reserved stock is immediately removed from

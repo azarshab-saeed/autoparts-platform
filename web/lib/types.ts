@@ -106,6 +106,7 @@ export type NetworkSearchResult = {
   selling_price: number;
   available: number;
   allow_reservation: boolean;
+  allow_procurement?: boolean;
   last_updated_at: string;
   freshness: "live" | "recent" | "stale";
   distance_km?: number;
@@ -122,6 +123,7 @@ export type NetworkStoreOffer = {
   selling_price: number;
   visible: boolean;
   allow_reservation: boolean;
+  allow_procurement?: boolean;
   last_verified_at: string;
 };
 
@@ -134,6 +136,39 @@ export type StoreNetworkProfile = {
   city?: string;
   latitude?: number;
   longitude?: number;
+};
+
+
+export type NetworkProcurementStatus = "requested" | "accepted" | "ready" | "received" | "rejected" | "cancelled" | "expired";
+export type NetworkProcurement = {
+  id: string;
+  buyer_store_id: string;
+  buyer_store_name: string;
+  buyer_warehouse_id: string;
+  buyer_product_id: string;
+  buyer_product_title: string;
+  seller_store_id: string;
+  seller_store_name: string;
+  seller_warehouse_id: string;
+  seller_product_id: string;
+  seller_product_title: string;
+  offer_id: string;
+  qty: number;
+  unit_price: number;
+  total_amount: number;
+  status: NetworkProcurementStatus;
+  expires_at: string;
+  seller_sale_id?: string;
+  buyer_purchase_id?: string;
+  created_at: string;
+  updated_at: string;
+};
+export type ProcurementReceiveResult = {
+  procurement_id: string;
+  seller_sale_id: string;
+  buyer_purchase_id: string;
+  total_amount: number;
+  status: NetworkProcurementStatus;
 };
 
 export type NetworkReservationStatus = "pending" | "accepted" | "ready" | "fulfilled" | "rejected" | "cancelled" | "expired";

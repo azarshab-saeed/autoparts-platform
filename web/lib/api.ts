@@ -15,7 +15,7 @@ import type {
   SaleItem,
   SettlementResult,
   Supplier,
-  UserSession, NetworkSearchResult, NetworkStoreOffer, StoreNetworkProfile, NetworkReservation, NetworkReservationStatus, ReservationFulfillmentResult, Expense, ExpenseCategory, PartyStatement, ProfitLoss, CashReport, DailyClosing, DashboardSummary, InventoryInsightReport, PagedResult, PurchaseHistoryItem, SaleHistoryItem
+  UserSession, NetworkSearchResult, NetworkStoreOffer, StoreNetworkProfile, NetworkReservation, NetworkReservationStatus, ReservationFulfillmentResult, Expense, ExpenseCategory, PartyStatement, ProfitLoss, CashReport, DailyClosing, DashboardSummary, InventoryInsightReport, PagedResult, PurchaseHistoryItem, SaleHistoryItem, NetworkProcurement, ProcurementReceiveResult
 } from "./types";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
@@ -204,7 +204,36 @@ export async function searchNetwork(q:string, opts:{lat?:number;lng?:number;sort
 export async function getNetworkStoreProfile(session:UserSession):Promise<StoreNetworkProfile>{ if(MOCK_MODE)return getMockNetworkProfile(); return request<StoreNetworkProfile>("/v1/network/store-profile",{},session.token); }
 export async function updateNetworkStoreProfile(session:UserSession,profile:StoreNetworkProfile):Promise<void>{ if(MOCK_MODE){setMockNetworkProfile(profile as any);return;} await request("/v1/network/store-profile",{method:"PUT",body:JSON.stringify({network_enabled:profile.network_enabled,address:profile.address||"",phone:profile.phone||"",city:profile.city||"",latitude:profile.latitude??null,longitude:profile.longitude??null})},session.token); }
 export async function getNetworkStoreOffers(session:UserSession):Promise<NetworkStoreOffer[]>{ if(MOCK_MODE)return getMockStoreOffers(); const out=await request<{items:NetworkStoreOffer[]}>(`/v1/network/offers?warehouse_id=${encodeURIComponent(session.warehouseId)}`,{},session.token);return out.items; }
-export async function updateNetworkStoreOffer(session:UserSession,productId:string,price:number,visible:boolean,allowReservation:boolean):Promise<void>{ if(MOCK_MODE){setMockStoreOffer(productId,price,visible,allowReservation);return;} await request(`/v1/network/offers/${encodeURIComponent(productId)}`,{method:"PUT",body:JSON.stringify({warehouse_id:session.warehouseId,selling_price:price,visible,allow_reservation:allowReservation})},session.token); }
+export async function updateNetworkStoreOffer(session:UserSession,productId:string,price:number,visible:boolean,allowReservation:boolean,allowProcurement:boolean):Promise<void>{ if(MOCK_MODE){setMockStoreOffer(productId,price,visible,allowReservation);return;} await request(`/v1/network/offers/${encodeURIComponent(productId)}`,{method:"PUT",body:JSON.stringify({warehouse_id:session.warehouseId,selling_price:price,visible,allow_reservation:allowReservation,allow_procurement:allowProcurement})},session.token); }
+
+let mockProcurements:NetworkProcurement[]=[];
+export async function searchNetworkProcurement(session:UserSession,q:string,sort:"best"|"price"|"distance"|"fresh"="best"):Promise<NetworkSearchResult[]>{
+  if(MOCK_MODE)return mockNetworkResults.filter(x=>x.store_id!==session.storeId);
+  const out=await request<{items:NetworkSearchResult[]}>(`/v1/network/procurement/search?q=${encodeURIComponent(q)}&sort=${sort}&limit=50`,{},session.token);return out.items;
+}
+export async function createNetworkProcurement(session:UserSession,input:{offerId:string;buyerProductId:string;qty:number}):Promise<NetworkProcurement>{
+  if(MOCK_MODE){const offer=mockNetworkResults.find(x=>x.offer_id===input.offerId)!;const now=new Date();const x:NetworkProcurement={id:crypto.randomUUID(),buyer_store_id:session.storeId,buyer_store_name:session.storeName,buyer_warehouse_id:session.warehouseId,buyer_product_id:input.buyerProductId,buyer_product_title:offer.title,seller_store_id:offer.store_id,seller_store_name:offer.store_name,seller_warehouse_id:"mock",seller_product_id:offer.product_id,seller_product_title:offer.title,offer_id:offer.offer_id,qty:input.qty,unit_price:offer.selling_price,total_amount:input.qty*offer.selling_price,status:"requested",expires_at:new Date(now.getTime()+12*3600000).toISOString(),created_at:now.toISOString(),updated_at:now.toISOString()};mockProcurements=[x,...mockProcurements];return x;}
+  return request<NetworkProcurement>("/v1/network/procurements",{method:"POST",headers:{"Idempotency-Key":crypto.randomUUID()},body:JSON.stringify({offer_id:input.offerId,buyer_product_id:input.buyerProductId,warehouse_id:session.warehouseId,qty:input.qty})},session.token);
+}
+export async function getBuyingProcurements(session:UserSession):Promise<NetworkProcurement[]>{
+  if(MOCK_MODE)return mockProcurements.filter(x=>x.buyer_store_id===session.storeId);const out=await request<{items:NetworkProcurement[]}>("/v1/network/procurements/buying",{},session.token);return out.items;
+}
+export async function getSellingProcurements(session:UserSession):Promise<NetworkProcurement[]>{
+  if(MOCK_MODE)return mockProcurements.filter(x=>x.seller_store_id===session.storeId);const out=await request<{items:NetworkProcurement[]}>("/v1/network/procurements/selling",{},session.token);return out.items;
+}
+export async function transitionSellingProcurement(session:UserSession,id:string,status:"accepted"|"ready"|"rejected"):Promise<NetworkProcurement>{
+  if(MOCK_MODE){let out=mockProcurements.find(x=>x.id===id)!;out={...out,status,updated_at:new Date().toISOString()};mockProcurements=mockProcurements.map(x=>x.id===id?out:x);return out;}
+  return request<NetworkProcurement>(`/v1/network/procurements/${encodeURIComponent(id)}`,{method:"PATCH",body:JSON.stringify({status})},session.token);
+}
+export async function cancelBuyingProcurement(session:UserSession,id:string):Promise<NetworkProcurement>{
+  if(MOCK_MODE){let out=mockProcurements.find(x=>x.id===id)!;out={...out,status:"cancelled",updated_at:new Date().toISOString()};mockProcurements=mockProcurements.map(x=>x.id===id?out:x);return out;}
+  return request<NetworkProcurement>(`/v1/network/procurements/${encodeURIComponent(id)}/cancel`,{method:"POST"},session.token);
+}
+export async function receiveNetworkProcurement(session:UserSession,id:string):Promise<ProcurementReceiveResult>{
+  if(MOCK_MODE){const purchase=crypto.randomUUID(),sale=crypto.randomUUID();mockProcurements=mockProcurements.map(x=>x.id===id?{...x,status:"received",buyer_purchase_id:purchase,seller_sale_id:sale,updated_at:new Date().toISOString()}:x);return{procurement_id:id,buyer_purchase_id:purchase,seller_sale_id:sale,total_amount:mockProcurements.find(x=>x.id===id)?.total_amount||0,status:"received"};}
+  return request<ProcurementReceiveResult>(`/v1/network/procurements/${encodeURIComponent(id)}/receive`,{method:"POST",headers:{"Idempotency-Key":crypto.randomUUID()}},session.token);
+}
+
 
 
 export async function createNetworkReservation(session:UserSession,offerId:string,qty:number):Promise<NetworkReservation>{

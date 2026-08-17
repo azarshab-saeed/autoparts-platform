@@ -21,6 +21,7 @@ import (
 	"github.com/example/autoparts-core/internal/platform/auth"
 	"github.com/example/autoparts-core/internal/platform/db"
 	"github.com/example/autoparts-core/internal/platform/pagination"
+	"github.com/example/autoparts-core/internal/procurement"
 	"github.com/example/autoparts-core/internal/purchases"
 	"github.com/example/autoparts-core/internal/reservations"
 	returnsvc "github.com/example/autoparts-core/internal/returns"
@@ -52,6 +53,7 @@ func main() {
 	storeSvc := stores.NewService(pool)
 	salesSvc := sales.NewService(pool)
 	purchaseSvc := purchases.NewService(pool)
+	procurementSvc := procurement.NewService(pool)
 	inventorySvc := inventory.NewService(pool)
 	networkSvc := network.NewService(pool)
 	financeSvc := finance.NewService(pool)
@@ -682,6 +684,143 @@ func main() {
 			return
 		}
 		api.WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	})))
+
+	protected.Handle("GET /v1/network/procurement/search", auth.RequireRoles("owner", "admin", "warehouse")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, _ := auth.ClaimsFrom(r.Context())
+		q := strings.TrimSpace(r.URL.Query().Get("q"))
+		lat, err := optionalFloatQuery(r, "lat", -90, 90)
+		if err != nil {
+			api.WriteError(w, err)
+			return
+		}
+		lng, err := optionalFloatQuery(r, "lng", -180, 180)
+		if err != nil {
+			api.WriteError(w, err)
+			return
+		}
+		if (lat == nil) != (lng == nil) {
+			api.WriteError(w, api.BadRequest("invalid_location", "lat and lng must be provided together"))
+			return
+		}
+		limit, _, err := pageParams(r)
+		if err != nil {
+			api.WriteError(w, err)
+			return
+		}
+		_, _ = reservationSvc.ExpireDue(r.Context(), 100)
+		_, _ = procurementSvc.ExpireDue(r.Context(), 100)
+		out, err := networkSvc.SearchProcurement(r.Context(), c.StoreID, q, lat, lng, r.URL.Query().Get("sort"), limit)
+		if err != nil {
+			api.WriteError(w, api.BadRequest("procurement_search_failed", err.Error()))
+			return
+		}
+		api.WriteJSON(w, http.StatusOK, map[string]any{"items": out, "count": len(out)})
+	})))
+
+	protected.Handle("POST /v1/network/procurements", auth.RequireRoles("owner", "admin", "warehouse")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, _ := auth.ClaimsFrom(r.Context())
+		var in struct {
+			OfferID        uuid.UUID `json:"offer_id"`
+			BuyerProductID uuid.UUID `json:"buyer_product_id"`
+			WarehouseID    uuid.UUID `json:"warehouse_id"`
+			Qty            float64   `json:"qty"`
+		}
+		if err := decodeJSON(r, &in); err != nil {
+			api.WriteError(w, err)
+			return
+		}
+		key := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
+		if key == "" {
+			api.WriteError(w, api.BadRequest("missing_idempotency_key", "Idempotency-Key header is required"))
+			return
+		}
+		out, err := procurementSvc.Create(r.Context(), procurement.CreateCommand{
+			BuyerTenantID: c.TenantID, BuyerStoreID: c.StoreID, BuyerWarehouseID: in.WarehouseID,
+			BuyerProductID: in.BuyerProductID, ActorUserID: c.UserID, OfferID: in.OfferID, Qty: in.Qty, IdempotencyKey: key,
+		})
+		if err != nil {
+			api.WriteError(w, api.Conflict("procurement_rejected", err.Error()))
+			return
+		}
+		api.WriteJSON(w, http.StatusCreated, out)
+	})))
+
+	protected.Handle("GET /v1/network/procurements/buying", auth.RequireRoles("owner", "admin", "warehouse", "accountant")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, _ := auth.ClaimsFrom(r.Context())
+		out, err := procurementSvc.ListBuyer(r.Context(), c.TenantID, c.StoreID, strings.TrimSpace(r.URL.Query().Get("status")))
+		if err != nil {
+			api.WriteError(w, api.Conflict("procurement_buying_query_failed", err.Error()))
+			return
+		}
+		api.WriteJSON(w, http.StatusOK, map[string]any{"items": out})
+	})))
+
+	protected.Handle("GET /v1/network/procurements/selling", auth.RequireRoles("owner", "admin", "warehouse", "accountant")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, _ := auth.ClaimsFrom(r.Context())
+		out, err := procurementSvc.ListSeller(r.Context(), c.TenantID, c.StoreID, strings.TrimSpace(r.URL.Query().Get("status")))
+		if err != nil {
+			api.WriteError(w, api.Conflict("procurement_selling_query_failed", err.Error()))
+			return
+		}
+		api.WriteJSON(w, http.StatusOK, map[string]any{"items": out})
+	})))
+
+	protected.Handle("PATCH /v1/network/procurements/{id}", auth.RequireRoles("owner", "admin", "warehouse")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, _ := auth.ClaimsFrom(r.Context())
+		id, err := uuid.Parse(r.PathValue("id"))
+		if err != nil {
+			api.WriteError(w, api.BadRequest("invalid_procurement_id", "procurement id must be a UUID"))
+			return
+		}
+		var in struct {
+			Status string `json:"status"`
+		}
+		if err := decodeJSON(r, &in); err != nil {
+			api.WriteError(w, err)
+			return
+		}
+		out, err := procurementSvc.SellerTransition(r.Context(), c.TenantID, c.StoreID, c.UserID, id, procurement.Status(strings.TrimSpace(in.Status)))
+		if err != nil {
+			api.WriteError(w, api.Conflict("procurement_transition_rejected", err.Error()))
+			return
+		}
+		api.WriteJSON(w, http.StatusOK, out)
+	})))
+
+	protected.Handle("POST /v1/network/procurements/{id}/cancel", auth.RequireRoles("owner", "admin", "warehouse")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, _ := auth.ClaimsFrom(r.Context())
+		id, err := uuid.Parse(r.PathValue("id"))
+		if err != nil {
+			api.WriteError(w, api.BadRequest("invalid_procurement_id", "procurement id must be a UUID"))
+			return
+		}
+		out, err := procurementSvc.BuyerCancel(r.Context(), c.TenantID, c.StoreID, c.UserID, id)
+		if err != nil {
+			api.WriteError(w, api.Conflict("procurement_cancel_rejected", err.Error()))
+			return
+		}
+		api.WriteJSON(w, http.StatusOK, out)
+	})))
+
+	protected.Handle("POST /v1/network/procurements/{id}/receive", auth.RequireRoles("owner", "admin", "warehouse")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, _ := auth.ClaimsFrom(r.Context())
+		id, err := uuid.Parse(r.PathValue("id"))
+		if err != nil {
+			api.WriteError(w, api.BadRequest("invalid_procurement_id", "procurement id must be a UUID"))
+			return
+		}
+		key := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
+		if key == "" {
+			api.WriteError(w, api.BadRequest("missing_idempotency_key", "Idempotency-Key header is required"))
+			return
+		}
+		out, err := procurementSvc.Receive(r.Context(), procurement.ReceiveCommand{BuyerTenantID: c.TenantID, BuyerStoreID: c.StoreID, ActorUserID: c.UserID, ProcurementID: id, IdempotencyKey: key})
+		if err != nil {
+			api.WriteError(w, api.Conflict("procurement_receive_rejected", err.Error()))
+			return
+		}
+		api.WriteJSON(w, http.StatusCreated, out)
 	})))
 
 	protected.Handle("POST /v1/network/reservations", auth.RequireRoles("mechanic", "consumer")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
