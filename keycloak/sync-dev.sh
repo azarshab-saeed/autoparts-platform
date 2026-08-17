@@ -95,14 +95,46 @@ ensure_user() {
 
   "$KCADM" set-password -r "$REALM" --username "$username" --new-password "$DEV_PASSWORD" >/dev/null
 
-  # Keep the test identity deterministic. Remove other application realm roles,
-  # then assign exactly the role expected by the app.
+  # Keep the test identity deterministic. Best-effort removal of other app
+  # roles is fine, but assigning the expected role must never be silent.
   for app_role in owner admin cashier warehouse accountant mechanic consumer; do
     if [ "$app_role" != "$role" ]; then
       "$KCADM" remove-roles -r "$REALM" --uusername "$username" --rolename "$app_role" >/dev/null 2>&1 || true
     fi
   done
-  "$KCADM" add-roles -r "$REALM" --uusername "$username" --rolename "$role" >/dev/null 2>&1 || true
+
+  # Use the generic Admin REST endpoint instead of relying on the add-roles
+  # convenience command. This is explicit and stable across Keycloak 26.x.
+  role_file="/tmp/keycloak-sync-role-$role.json"
+  role_array_file="/tmp/keycloak-sync-role-$role-array.json"
+  "$KCADM" get "roles/$role" -r "$REALM" >"$role_file"
+  {
+    printf '[\n'
+    cat "$role_file"
+    printf '\n]\n'
+  } >"$role_array_file"
+  "$KCADM" create "users/$uid/role-mappings/realm" -r "$REALM" -f "$role_array_file" >/dev/null
+
+  # A green sync must mean the identity is really usable by the Go verifier.
+  if ! "$KCADM" get "users/$uid/role-mappings/realm" -r "$REALM" \
+      --fields name --format csv --noquotes 2>/dev/null | grep -Fxq "$role"; then
+    log "realm role verification failed for $username: expected $role"
+    return 1
+  fi
+
+  profile_file="/tmp/keycloak-sync-user-$uid.json"
+  "$KCADM" get "users/$uid" -r "$REALM" >"$profile_file"
+  if [ -n "$tenant_id" ] && [ -n "$store_id" ]; then
+    if ! grep -Fq "\"$tenant_id\"" "$profile_file"; then
+      log "tenant_id verification failed for $username"
+      return 1
+    fi
+    if ! grep -Fq "\"$store_id\"" "$profile_file"; then
+      log "store_id verification failed for $username"
+      return 1
+    fi
+  fi
+  log "verified dev identity: $username role=$role"
 }
 
 client_uuid() {
