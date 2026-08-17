@@ -37,14 +37,15 @@ export default function MechanicPage(){
   const selectedModel=useMemo(()=>selectedMake?.models.find(x=>x.id===modelId),[selectedMake,modelId]);
   const selectedVariant=useMemo(()=>selectedModel?.variants.find(x=>x.id===variantId),[selectedModel,variantId]);
 
-  async function run(e?:FormEvent, overrideSort?:Sort){
+  async function run(e?:FormEvent, overrideSort?:Sort, overrideQuery?:string){
     e?.preventDefault(); setError(""); setNotice("");
-    if(q.trim().length<2&&!variantId){setError("حداقل دو حرف از نام یا کد قطعه را وارد کن یا خودرو را انتخاب کن.");return;}
+    const term=overrideQuery??q;
+    if(term.trim().length<2&&!variantId){setError("حداقل دو حرف از نام یا کد قطعه را وارد کن یا خودرو را انتخاب کن.");return;}
     const parsedYear=year?Number(year):undefined;
     if(year&&(!Number.isInteger(parsedYear)||Number(parsedYear)<1200||Number(parsedYear)>2200)){setError("سال مدل را بین ۱۲۰۰ تا ۲۲۰۰ وارد کن.");return;}
     setLoading(true);
     try{
-      setItems(await searchNetwork(q,{sort:overrideSort||sort,lat:location?.lat,lng:location?.lng,limit:40,vehicleVariantId:variantId||undefined,year:parsedYear}));
+      setItems(await searchNetwork(term,{sort:overrideSort||sort,lat:location?.lat,lng:location?.lng,limit:40,vehicleVariantId:variantId||undefined,year:parsedYear}));
       setSearched(true);
     }catch(err){setError(err instanceof Error?err.message:"جست‌وجو انجام نشد.");}finally{setLoading(false);}
   }
@@ -68,41 +69,44 @@ export default function MechanicPage(){
     }catch(err){setError(err instanceof Error?err.message:"رزرو انجام نشد.");}finally{setReserving(false);}
   }
   const cheapest=useMemo(()=>items.length?Math.min(...items.map(x=>x.selling_price)):0,[items]);
+  const suggestions=["لنت 206","فیلتر روغن 206","واتر پمپ EF7","4254.97"];
 
-  return <main className="mechanic-page">
+  return <main className="mechanic-page polished-mechanic">
     <header className="mechanic-header">
-      <Link href="/mechanic" className="mechanic-brand"><span>ی</span><b>شبکه قطعات</b></Link>
+      <Link href="/mechanic" className="mechanic-brand"><span>ی</span><div><b>شبکه قطعات</b><small>موجودی واقعی فروشگاه‌ها</small></div></Link>
       <div className="mechanic-account">
-        {ready&&session ? <><span>{session.displayName}</span>{(session.role==="mechanic"||session.role==="consumer")&&<Link href="/mechanic/orders">رزروهای من</Link>}{session.role!=="mechanic"&&session.role!=="consumer"&&<Link href="/store">پنل فروشگاه</Link>}<button onClick={()=>void logout()}>خروج</button></>:
-          <button className="mechanic-login" onClick={()=>void login("/mechanic")}>ورود مکانیک</button>}
+        {ready&&session ? <><span className="account-name">{session.displayName}</span>{(session.role==="mechanic"||session.role==="consumer")&&<Link className="orders-link" href="/mechanic/orders">رزروهای من</Link>}{session.role!=="mechanic"&&session.role!=="consumer"&&<Link className="orders-link" href="/store">پنل فروشگاه</Link>}<button onClick={()=>void logout()}>خروج</button></>:
+          <button className="mechanic-login" onClick={()=>void login("/mechanic")}>ورود / رزرو قطعه</button>}
       </div>
     </header>
 
     <section className="mechanic-hero">
-      <div className="hero-copy"><span className="eyebrow">جست‌وجوی هوشمند + تطبیق خودرو</span><h1>قطعه درست برای خودروی درست.</h1><p>نام قطعه، OEM، کد فروشگاهی یا خودرو را وارد کن؛ فقط موجودی‌های سازگار و قابل فروش شبکه را ببین.</p></div>
-      <form className="mechanic-search" onSubmit={run}><input value={q} onChange={e=>setQ(e.target.value)} placeholder="مثلاً لنت 206، 4254.97، واتر پمپ EF7" autoFocus/><button disabled={loading}>{loading?"در حال جست‌وجو...":"جست‌وجو"}</button></form>
+      <div className="hero-copy"><span className="hero-badge">جست‌وجوی هوشمند قطعه</span><h1>قطعه درست، نزدیک‌ترین فروشگاه.</h1><p>با نام قطعه، کد OEM یا خودروی مشتری جست‌وجو کن؛ قیمت، موجودی و فاصله فروشگاه‌ها را یکجا مقایسه کن.</p></div>
+      <form className="mechanic-search" onSubmit={run}><div className="mechanic-search-input"><span>⌕</span><input value={q} onChange={e=>setQ(e.target.value)} placeholder="مثلاً لنت 206، 4254.97، واتر پمپ EF7" autoFocus/></div><button disabled={loading}>{loading?<><i className="button-spinner"/>در حال جست‌وجو</>:"جست‌وجوی قطعه"}</button></form>
+      <div className="search-suggestions"><span>جست‌وجوی سریع:</span>{suggestions.map(v=><button type="button" key={v} onClick={()=>{setQ(v);void run(undefined,undefined,v)}}>{v}</button>)}</div>
+
       <div className="vehicle-filter-card">
-        <div><b>فیلتر خودرو</b><span>اختیاری؛ برای حذف قطعات ناسازگار</span></div>
-        <select value={makeId} onChange={e=>{setMakeId(e.target.value);setModelId("");setVariantId("");setYear("");}}><option value="">سازنده</option>{vehicles.map(x=><option key={x.id} value={x.id}>{x.name}</option>)}</select>
-        <select value={modelId} disabled={!selectedMake} onChange={e=>{setModelId(e.target.value);setVariantId("");setYear("");}}><option value="">مدل</option>{selectedMake?.models.map(x=><option key={x.id} value={x.id}>{x.name}</option>)}</select>
-        <select value={variantId} disabled={!selectedModel} onChange={e=>{setVariantId(e.target.value);const v=selectedModel?.variants.find(x=>x.id===e.target.value);setYear(v?.year_to?String(v.year_to):"");}}><option value="">تیپ / موتور</option>{selectedModel?.variants.map(x=><option key={x.id} value={x.id}>{x.name}{x.engine_code?` · ${x.engine_code}`:""}</option>)}</select>
-        <input className="vehicle-year" inputMode="numeric" value={year} disabled={!variantId} onChange={e=>setYear(e.target.value)} placeholder="سال مدل"/>
+        <div className="vehicle-filter-copy"><span className="vehicle-icon">🚘</span><div><b>خودروی مشتری</b><span>انتخاب خودرو نتایج ناسازگار را حذف می‌کند.</span></div></div>
+        <select aria-label="سازنده خودرو" value={makeId} onChange={e=>{setMakeId(e.target.value);setModelId("");setVariantId("");setYear("");}}><option value="">سازنده</option>{vehicles.map(x=><option key={x.id} value={x.id}>{x.name}</option>)}</select>
+        <select aria-label="مدل خودرو" value={modelId} disabled={!selectedMake} onChange={e=>{setModelId(e.target.value);setVariantId("");setYear("");}}><option value="">مدل</option>{selectedMake?.models.map(x=><option key={x.id} value={x.id}>{x.name}</option>)}</select>
+        <select aria-label="تیپ خودرو" value={variantId} disabled={!selectedModel} onChange={e=>{setVariantId(e.target.value);const v=selectedModel?.variants.find(x=>x.id===e.target.value);setYear(v?.year_to?String(v.year_to):"");}}><option value="">تیپ / موتور</option>{selectedModel?.variants.map(x=><option key={x.id} value={x.id}>{x.name}{x.engine_code?` · ${x.engine_code}`:""}</option>)}</select>
+        <input aria-label="سال مدل" className="vehicle-year" inputMode="numeric" value={year} disabled={!variantId} onChange={e=>setYear(e.target.value)} placeholder="سال مدل"/>
         {(makeId||modelId||variantId)&&<button type="button" className="vehicle-clear" onClick={()=>{setMakeId("");setModelId("");setVariantId("");setYear("");}}>پاک کردن</button>}
       </div>
-      {selectedVariant&&<div className="selected-vehicle">خودرو: <b>{selectedMake?.name} {selectedModel?.name} {selectedVariant.name}</b>{selectedVariant.engine_code&&<span> موتور {selectedVariant.engine_code}</span>}{year&&<span> · سال {new Intl.NumberFormat("fa-IR",{useGrouping:false}).format(Number(year))}</span>}</div>}
+      {selectedVariant&&<div className="selected-vehicle"><span>✓</span> خودرو: <b>{selectedMake?.name} {selectedModel?.name} {selectedVariant.name}</b>{selectedVariant.engine_code&&<em>موتور {selectedVariant.engine_code}</em>}{year&&<em>سال {new Intl.NumberFormat("fa-IR",{useGrouping:false}).format(Number(year))}</em>}</div>}
       <div className="mechanic-filters"><div className="sort-pills">{([['best','مرتبط‌ترین'],['price','ارزان‌ترین'],['distance','نزدیک‌ترین'],['fresh','تازه‌ترین']] as [Sort,string][]).map(([v,l])=><button type="button" key={v} className={sort===v?"active":""} onClick={()=>{setSort(v);if(searched)void run(undefined,v);}}>{l}</button>)}</div><button type="button" className={location?"location-btn active":"location-btn"} onClick={locate}>{location?"✓ موقعیت فعال است":"⌖ استفاده از موقعیت من"}</button></div>
-      {error&&<div className="mechanic-error">{error}</div>}{notice&&<div className="mechanic-success">{notice} <Link href="/mechanic/orders">مشاهده رزروها</Link></div>}
+      {error&&<div className="mechanic-error">{error}</div>}{notice&&<div className="mechanic-success">{notice} <Link href="/mechanic/orders">مشاهده رزروها ←</Link></div>}
     </section>
 
     <section className="mechanic-results">
-      {!searched&&!loading&&<div className="mechanic-start"><b>با نام، کد یا خودرو جست‌وجو کن</b><span>مثلاً OEM «4254.97» یا خودروی «پژو 206 تیپ 5» را امتحان کن.</span><button onClick={()=>void run()}>نمایش نمونه</button></div>}
-      {searched&&<div className="results-head"><div><b>{items.length} نتیجه</b><span>{items.length?`شروع قیمت از ${money(cheapest)}`:"قطعه سازگار با موجودی قابل نمایش پیدا نشد."}</span></div>{location&&<small>فاصله‌ها با موقعیت فعلی شما محاسبه شده‌اند.</small>}</div>}
-      <div className="network-cards">{items.map((x,i)=><article className="network-card" key={x.offer_id}>
-        <div className="network-card-top"><div><div className="network-title-row"><h2>{x.title}</h2>{i===0&&sort==="best"&&<span className="best-tag">پیشنهاد</span>}</div><p>{[x.brand,x.oem_code,x.sku].filter(Boolean).join(" · ")}</p></div><div className="network-price"><b>{money(x.selling_price)}</b>{x.selling_price===cheapest&&<span>کمترین قیمت</span>}</div></div>
+      {!searched&&!loading&&<div className="mechanic-start"><span className="start-icon">⌕</span><b>با نام، کد یا خودرو جست‌وجو کن</b><span>OEM «4254.97» یا خودروی «پژو 206 تیپ 5» را امتحان کن.</span><button onClick={()=>void run()}>نمایش نتایج نمونه</button></div>}
+      {searched&&<div className="results-head"><div><b>{items.length} نتیجه پیدا شد</b><span>{items.length?`شروع قیمت از ${money(cheapest)}`:"قطعه سازگار با موجودی قابل نمایش پیدا نشد."}</span></div>{location&&<small>⌖ فاصله‌ها با موقعیت فعلی شما محاسبه شده‌اند.</small>}</div>}
+      <div className="network-cards">{items.map((x,i)=><article className={`network-card${i===0&&sort==="best"?" featured":""}`} key={x.offer_id}>
+        <div className="network-card-top"><div><div className="network-title-row"><h2>{x.title}</h2>{i===0&&sort==="best"&&<span className="best-tag">★ پیشنهاد اول</span>}</div><p>{[x.brand,x.oem_code,x.sku].filter(Boolean).join(" · ")}</p></div><div className="network-price"><b>{money(x.selling_price)}</b>{x.selling_price===cheapest&&<span>کمترین قیمت</span>}</div></div>
         <div className="fitment-strip"><span className="match-reason">{reasonLabel(x.match_reason)}</span>{x.fitment_match&&<span className="fitment-ok">✓ سازگار با خودروی انتخابی</span>}{x.fitment_summary&&<span className="fitment-summary">{x.fitment_summary}</span>}</div>
         <div className="store-row"><div className="store-avatar">{x.store_name.slice(0,1)}</div><div className="store-info"><b>{x.store_name}</b><span>{x.address||x.city||"آدرس ثبت نشده"}</span></div>{x.distance_km!=null&&<div className="distance"><b>{number(x.distance_km)}</b><span>کیلومتر</span></div>}</div>
-        <div className="network-meta"><span className="stock-ok">● {number(x.available)} عدد موجود</span><span className={`fresh ${x.freshness}`}>{x.freshness==="live"?"موجودی لحظه‌ای":x.freshness==="recent"?"بروزرسانی امروز":"نیاز به تأیید"}</span>{x.allow_reservation&&<span className="reserve-tag">قابل رزرو</span>}</div>
-        <div className="network-actions">{x.allow_reservation&&<button className="reserve-action" onClick={()=>openReserve(x)}>رزرو قطعه</button>}{x.phone&&<a className="primary-action" href={`tel:${x.phone}`}>تماس</a>}<a className="secondary-action" target="_blank" rel="noreferrer" href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(x.address||x.store_name)}`}>مسیریابی</a></div>
+        <div className="network-meta"><span className="stock-ok"><i/> {number(x.available)} عدد موجود</span><span className={`fresh ${x.freshness}`}>{x.freshness==="live"?"موجودی لحظه‌ای":x.freshness==="recent"?"بروزرسانی امروز":"نیاز به تأیید"}</span>{x.allow_reservation&&<span className="reserve-tag">قابل رزرو</span>}</div>
+        <div className="network-actions">{x.allow_reservation&&<button className="reserve-action" onClick={()=>openReserve(x)}>رزرو قطعه</button>}{x.phone&&<a className="primary-action" href={`tel:${x.phone}`}>☎ تماس</a>}<a className="secondary-action" target="_blank" rel="noreferrer" href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(x.address||x.store_name)}`}>⌖ مسیریابی</a></div>
       </article>)}</div>
     </section>
 

@@ -5,23 +5,37 @@ import { BoxIcon, CartIcon, ChartIcon, HomeIcon, SearchIcon, SettingsIcon, Users
 import { useEffect } from "react";
 import { useAuth } from "@/components/auth-provider";
 
-const nav = [
-  ["/store", "داشبورد", HomeIcon],
-  ["/store/sales", "فروش", CartIcon],
-  ["/store/purchases", "خرید", BoxIcon],
-  ["/store/inventory", "انبار و کالاها", BoxIcon],
-  ["/store/accounts", "حساب‌ها", UsersIcon],
-  ["/store/expenses", "هزینه‌ها", ChartIcon],
-  ["/store/closing", "صندوق و بستن روز", ChartIcon],
-  ["/store/returns", "مرجوعی", CartIcon],
-  ["/store/network", "شبکه قطعات", SearchIcon],
-  ["/store/fitment", "کاتالوگ و فیتمنت", SearchIcon],
-  ["/store/procurement", "تأمین از شبکه", BoxIcon],
-  ["/store/orders", "سفارش‌های شبکه", CartIcon],
-  ["/store/reports", "گزارش‌ها", ChartIcon],
-  ["/store/audit", "رویدادهای امنیتی", SettingsIcon],
-  ["#", "تنظیمات", SettingsIcon]
-] as const;
+type NavItem = {
+  href: string;
+  label: string;
+  icon: typeof HomeIcon;
+  group: "عملیات" | "شبکه" | "مالی و کنترل";
+  roles?: string[];
+  mobile?: boolean;
+  soon?: boolean;
+};
+
+const nav: NavItem[] = [
+  {href:"/store",label:"داشبورد",icon:HomeIcon,group:"عملیات",mobile:true},
+  {href:"/store/sales",label:"فروش",icon:CartIcon,group:"عملیات",mobile:true},
+  {href:"/store/purchases",label:"خرید",icon:BoxIcon,group:"عملیات"},
+  {href:"/store/inventory",label:"انبار و کالاها",icon:BoxIcon,group:"عملیات",mobile:true},
+  {href:"/store/network",label:"شبکه قطعات",icon:SearchIcon,group:"شبکه"},
+  {href:"/store/procurement",label:"تأمین از شبکه",icon:BoxIcon,group:"شبکه",mobile:true},
+  {href:"/store/orders",label:"سفارش‌های شبکه",icon:CartIcon,group:"شبکه",mobile:true},
+  {href:"/store/fitment",label:"کاتالوگ و فیتمنت",icon:SearchIcon,group:"شبکه"},
+  {href:"/store/accounts",label:"حساب‌ها",icon:UsersIcon,group:"مالی و کنترل"},
+  {href:"/store/expenses",label:"هزینه‌ها",icon:ChartIcon,group:"مالی و کنترل",roles:["owner","admin","accountant"]},
+  {href:"/store/closing",label:"صندوق و بستن روز",icon:ChartIcon,group:"مالی و کنترل",roles:["owner","admin","cashier","accountant"]},
+  {href:"/store/returns",label:"مرجوعی",icon:CartIcon,group:"مالی و کنترل"},
+  {href:"/store/reports",label:"گزارش‌ها",icon:ChartIcon,group:"مالی و کنترل",roles:["owner","admin","accountant"]},
+  {href:"/store/audit",label:"رویدادهای امنیتی",icon:SettingsIcon,group:"مالی و کنترل",roles:["owner","admin"]},
+  {href:"#",label:"تنظیمات",icon:SettingsIcon,group:"مالی و کنترل",soon:true},
+];
+
+const roleLabel: Record<string,string> = {
+  owner:"مالک فروشگاه",admin:"مدیر",cashier:"صندوقدار",warehouse:"انباردار",accountant:"حسابدار",
+};
 
 export default function StoreShell({children}:{children:React.ReactNode}){
   const path=usePathname();
@@ -31,22 +45,38 @@ export default function StoreShell({children}:{children:React.ReactNode}){
     if(ready&&!session) router.replace("/login");
     if(ready&&session&&(session.role==="mechanic"||session.role==="consumer")) router.replace("/mechanic");
   },[ready,session,router]);
-  if(!ready||!session||session.role==="mechanic"||session.role==="consumer") return <div className="loading-screen">در حال ورود به فروشگاه...</div>;
+  if(!ready||!session||session.role==="mechanic"||session.role==="consumer") return <div className="loading-screen"><span className="loading-dot"/>در حال ورود به فروشگاه...</div>;
+
+  const visible=nav.filter(item=>!item.roles||item.roles.includes(session.role));
+  const groups=(['عملیات','شبکه','مالی و کنترل'] as const);
+  const renderItem=(item:NavItem,mobile=false)=>{
+    const Icon=item.icon;
+    const active=item.href!=="#"&&(path===item.href||(item.href!=="/store"&&path.startsWith(item.href+"/")));
+    return <Link
+      key={`${mobile?'m':'d'}-${item.href}`}
+      href={item.href}
+      title={item.label}
+      onClick={e=>{if(item.href==="#")e.preventDefault()}}
+      className={`${active?"nav-item active":"nav-item"}${mobile?" mobile-nav-item":""}`}
+    ><span className="nav-icon"><Icon/></span><span className="nav-label">{item.label}</span>{item.soon&&<small>به‌زودی</small>}</Link>;
+  };
+
   return <div className="app-shell">
     <aside className="sidebar">
       <div className="brand"><div className="brand-mark">ی</div><div><b>فروشگاه هوشمند</b><span>{session.storeName}</span></div></div>
-      <nav>{nav.map(([href,label,Icon],i)=>{
-        if ((href==="/store/expenses"||href==="/store/reports") && !["owner","admin","accountant"].includes(session.role)) return null;
-        if (href==="/store/closing" && !["owner","admin","cashier","accountant"].includes(session.role)) return null;
-        if (href==="/store/audit" && !["owner","admin"].includes(session.role)) return null;
-        const active=href!== "#" && (path===href || (href!=="/store" && path.startsWith(href+"/")));
-        return <Link key={i} href={href} onClick={e=>{if(href==="#")e.preventDefault()}} className={active?"nav-item active":"nav-item"}><Icon/><span>{label}</span>{href==="#"&&<small>به‌زودی</small>}</Link>
-      })}</nav>
-      <button className="logout" onClick={()=>void logout()}>خروج از حساب</button>
+      <div className="store-context"><span className="context-dot"/><div><b>{session.storeName}</b><span>{roleLabel[session.role]||session.role}</span></div></div>
+      <nav className="desktop-nav">{groups.map(group=><div className="nav-group" key={group}><div className="nav-group-title">{group}</div>{visible.filter(item=>item.group===group).map(item=>renderItem(item))}</div>)}</nav>
+      <div className="sidebar-footer"><div className="sidebar-help"><b>همه‌چیز آماده فروش است</b><span>موجودی و شبکه به‌صورت زنده همگام‌اند.</span></div><button className="logout" onClick={()=>void logout()}>خروج از حساب</button></div>
     </aside>
+
     <main className="main-area">
-      <header className="topbar"><div className="global-search"><SearchIcon/><input placeholder="جست‌وجوی کالا، مشتری یا فاکتور..."/></div><div className="top-user"><div><b>{session.displayName}</b><span>{session.role}</span></div><div className="avatar">{session.displayName.slice(0,1)}</div></div></header>
+      <header className="topbar">
+        <div className="topbar-leading"><div className="mobile-brand"><span>ی</span><div><b>{session.storeName}</b><small>پنل فروشگاه</small></div></div><div className="global-search"><SearchIcon/><input aria-label="جست‌وجوی سراسری" placeholder="جست‌وجوی کالا، مشتری یا فاکتور..."/><kbd>⌘ K</kbd></div></div>
+        <div className="topbar-actions"><Link className="top-sale-action" href="/store/sales">+ فروش جدید</Link><div className="top-user"><div><b>{session.displayName}</b><span>{roleLabel[session.role]||session.role}</span></div><div className="avatar">{session.displayName.slice(0,1)}</div></div></div>
+      </header>
       <div className="page-content">{children}</div>
     </main>
+
+    <nav className="mobile-bottom-nav">{visible.filter(item=>item.mobile).map(item=>renderItem(item,true))}</nav>
   </div>;
 }
