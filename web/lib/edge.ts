@@ -53,3 +53,28 @@ export async function queueOfflineSale(items:SaleItem[],paymentMethod:"cash"|"ca
 export async function triggerStoreEdgeSync():Promise<void>{
   await localRequest<{status:string}>("/v1/sync",{method:"POST",body:"{}"},30000);
 }
+
+export type EdgePrinterConfig = {
+  enabled:boolean;
+  name:string;
+  transport:"tcp9100"|"file"|"windows_share"|"windows_spool_text"|"system_file"|string;
+  address:string;
+  language:"text"|"escpos"|"zpl"|"pdf"|string;
+};
+export type EdgeHardwareConfig = {
+  receipt_printer:EdgePrinterConfig;
+  label_printer:EdgePrinterConfig;
+  a4_printer:EdgePrinterConfig;
+  cash_drawer:{enabled:boolean;auto_open:boolean};
+  pos:{provider:"manual"|"mock"|"tcp_json"|string;address:string;timeout_seconds:number};
+  auto_print_receipt:boolean;
+};
+export type EdgePOSResult={approved:boolean;requires_operator:boolean;provider:string;rrn?:string;trace?:string;message?:string};
+
+export async function getEdgeHardwareConfig():Promise<EdgeHardwareConfig>{return localRequest<EdgeHardwareConfig>("/v1/hardware/config",{},1400)}
+export async function saveEdgeHardwareConfig(cfg:EdgeHardwareConfig):Promise<EdgeHardwareConfig>{return localRequest<EdgeHardwareConfig>("/v1/hardware/config",{method:"PUT",body:JSON.stringify(cfg)},2500)}
+export async function getEdgeHardwareStatus():Promise<Record<string,unknown>>{return localRequest<Record<string,unknown>>("/v1/hardware/status",{},1400)}
+export async function printEdgeReceipt(input:{number:string;store_name?:string;created_at?:string;payment_method:string;total_amount:number;lines:{title:string;qty:number;unit_price:number}[]}):Promise<void>{await localRequest<{status:string}>("/v1/hardware/receipt/print",{method:"POST",body:JSON.stringify(input)},7000)}
+export async function printEdgeLabel(input:{title:string;sku?:string;barcode?:string;price?:number;copies?:number}):Promise<void>{await localRequest<{status:string}>("/v1/hardware/label/print",{method:"POST",body:JSON.stringify(input)},7000)}
+export async function openEdgeCashDrawer():Promise<void>{await localRequest<{status:string}>("/v1/hardware/cash-drawer/open",{method:"POST",body:"{}"},5000)}
+export async function chargeEdgePOS(amount:number,reference:string):Promise<EdgePOSResult>{return localRequest<EdgePOSResult>("/v1/hardware/pos/charge",{method:"POST",body:JSON.stringify({amount,reference})},35000)}

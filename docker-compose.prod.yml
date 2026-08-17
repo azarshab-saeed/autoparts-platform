@@ -123,6 +123,7 @@ services:
         NEXT_PUBLIC_KEYCLOAK_CLIENT_ID: autoparts-web
         NEXT_PUBLIC_SHOW_DEV_CREDENTIALS: "false"
         NEXT_PUBLIC_EDGE_INSTALLER_URL: ${NEXT_PUBLIC_EDGE_INSTALLER_URL:-}
+        NEXT_PUBLIC_STORE_EDGE_URL: http://127.0.0.1:17624
     restart: unless-stopped
     environment:
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:?set NEXT_PUBLIC_API_URL}
@@ -132,6 +133,7 @@ services:
       NEXT_PUBLIC_KEYCLOAK_CLIENT_ID: autoparts-web
       NEXT_PUBLIC_SHOW_DEV_CREDENTIALS: "false"
       NEXT_PUBLIC_EDGE_INSTALLER_URL: ${NEXT_PUBLIC_EDGE_INSTALLER_URL:-}
+      NEXT_PUBLIC_STORE_EDGE_URL: http://127.0.0.1:17624
     depends_on:
       api:
         condition: service_healthy

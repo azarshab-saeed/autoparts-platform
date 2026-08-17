@@ -9,7 +9,7 @@ UNIT="$UNIT_DIR/autoparts-store-edge.service"
 mkdir -p "$BIN_DIR" "$DATA_DIR" "$UNIT_DIR"
 (
   cd "$ROOT"
-  CGO_ENABLED=0 go build -buildvcs=false -trimpath -ldflags "-s -w -X main.version=0.15.7.1" -o "$BIN" ./cmd/store-edge
+  CGO_ENABLED=0 go build -buildvcs=false -trimpath -ldflags "-s -w -X main.version=0.15.8" -o "$BIN" ./cmd/store-edge
 )
 cat > "$UNIT" <<UNIT
 [Unit]

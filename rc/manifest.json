@@ -1,8 +1,8 @@
 {
   "release": "0.15.0-rc.1",
-  "phase": "15.7",
-  "baseline_commit": "c200e311da2d4b7d1891ad9555e940ef632a779f",
-  "baseline_message": "feat: add adoption UX and safe catalog import",
+  "phase": "15.8",
+  "baseline_commit": "phase15.7.1.1-local",
+  "baseline_message": "fix: allow Store Edge local UI pairing origin",
   "required_migration": "014_store_edge_offline.sql",
   "postgres_image": "postgres:18.4",
   "keycloak_image": "keycloak/keycloak:26.7.0",
@@ -18,6 +18,7 @@
     "procurement hold/release",
     "catalog import safety + opening inventory accounting",
     "Store Edge durable queue + device pairing safety",
+    "store hardware bridge adapters + safety tests",
     "database accounting/inventory invariants",
     "network-search performance baseline"
   ]

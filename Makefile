@@ -70,16 +70,16 @@ edge-run:
 	go run ./cmd/store-edge
 
 edge-test:
-	go test ./internal/storeedge
+	go test ./cmd/store-edge ./internal/storeedge
 
 edge-build:
 	CGO_ENABLED=0 go build -trimpath -o bin/store-edge ./cmd/store-edge
 
 edge-build-windows:
-	powershell -ExecutionPolicy Bypass -File edge/windows/build.ps1 -Version 0.15.7.1
+	powershell -ExecutionPolicy Bypass -File edge/windows/build.ps1 -Version 0.15.8
 
 edge-build-windows-installer:
-	powershell -ExecutionPolicy Bypass -File edge/windows/build-installer.ps1 -Version 0.15.7.1
+	powershell -ExecutionPolicy Bypass -File edge/windows/build-installer.ps1 -Version 0.15.8
 
 edge-linux-install:
 	./edge/linux/install-user-service.sh

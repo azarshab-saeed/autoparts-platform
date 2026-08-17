@@ -1,5 +1,5 @@
 param(
-  [string]$Version = "0.15.7.1",
+  [string]$Version = "0.15.8",
   [ValidateSet("amd64")][string]$Arch = "amd64"
 )
 $ErrorActionPreference = "Stop"

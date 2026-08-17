@@ -8,14 +8,14 @@ Customers do not run `go`, `make`, Docker, or PowerShell manually.
 On a Windows x64 release machine with Go and Inno Setup 6:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File edge/windows/build-installer.ps1 -Version 0.15.7.1
+powershell -ExecutionPolicy Bypass -File edge/windows/build-installer.ps1 -Version 0.15.8
 ```
 
 For a signed customer release, install the signing certificate in the Windows certificate store and set its SHA-1 thumbprint:
 
 ```powershell
 $env:AUTOPARTS_SIGN_CERT_SHA1="CERTIFICATE_THUMBPRINT"
-powershell -ExecutionPolicy Bypass -File edge/windows/build-installer.ps1 -Version 0.15.7.1
+powershell -ExecutionPolicy Bypass -File edge/windows/build-installer.ps1 -Version 0.15.8
 ```
 
 The script writes the Setup executable and a `.sha256` file to `dist/`.

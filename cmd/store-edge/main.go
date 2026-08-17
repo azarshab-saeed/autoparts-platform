@@ -22,7 +22,7 @@ import (
 	"github.com/example/autoparts-core/internal/storeedge"
 )
 
-var version = "0.15.7.1"
+var version = "0.15.8"
 
 const windowsServiceName = "AutoPartsStoreEdge"
 
@@ -75,6 +75,7 @@ func runAgent(ctx context.Context, serviceMode bool) error {
 	}
 	cloud := storeedge.NewCloud()
 	syncer := storeedge.NewSyncer(store, cloud)
+	bridge := storeedge.NewHardwareBridge(store)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
@@ -154,6 +155,16 @@ func runAgent(ctx context.Context, serviceMode bool) error {
 			writeError(w, http.StatusConflict, err)
 			return
 		}
+		hw := store.HardwareConfig()
+		if hw.AutoPrintReceipt && hw.ReceiptPrinter.Enabled {
+			lines := make([]storeedge.ReceiptLine, 0, len(out.Items))
+			for _, x := range out.Items {
+				lines = append(lines, storeedge.ReceiptLine{Title: x.Title, Qty: x.Qty, UnitPrice: x.UnitPrice})
+			}
+			if err := bridge.PrintReceipt(r.Context(), storeedge.Receipt{Number: out.LocalNumber, StoreName: store.Config().StoreName, CreatedAt: out.CreatedAt, PaymentMethod: out.PaymentMethod, TotalAmount: out.TotalAmount, Lines: lines}); err != nil {
+				log.Printf("hardware receipt print warning: %v", err)
+			}
+		}
 		writeJSON(w, http.StatusCreated, out)
 		go func() {
 			syncCtx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
@@ -174,6 +185,86 @@ func runAgent(ctx context.Context, serviceMode bool) error {
 		}
 		writeJSON(w, http.StatusOK, map[string]string{"status": "retry_started"})
 	})
+	mux.HandleFunc("GET /v1/hardware/config", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, store.HardwareConfig())
+	})
+	mux.HandleFunc("PUT /v1/hardware/config", func(w http.ResponseWriter, r *http.Request) {
+		var cfg storeedge.HardwareConfig
+		if err := decodeJSON(r, &cfg); err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		if err := store.SaveHardwareConfig(cfg); err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, cfg)
+	})
+	mux.HandleFunc("GET /v1/hardware/status", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, bridge.Status())
+	})
+	mux.HandleFunc("POST /v1/hardware/receipt/print", func(w http.ResponseWriter, r *http.Request) {
+		var in storeedge.Receipt
+		if err := decodeJSON(r, &in); err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		if in.StoreName == "" {
+			in.StoreName = store.Config().StoreName
+		}
+		if err := bridge.PrintReceipt(r.Context(), in); err != nil {
+			writeError(w, http.StatusBadGateway, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"status": "printed"})
+	})
+	mux.HandleFunc("POST /v1/hardware/label/print", func(w http.ResponseWriter, r *http.Request) {
+		var in storeedge.Label
+		if err := decodeJSON(r, &in); err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		if err := bridge.PrintLabel(r.Context(), in); err != nil {
+			writeError(w, http.StatusBadGateway, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"status": "printed"})
+	})
+	mux.HandleFunc("POST /v1/hardware/cash-drawer/open", func(w http.ResponseWriter, r *http.Request) {
+		if err := bridge.OpenCashDrawer(r.Context()); err != nil {
+			writeError(w, http.StatusBadGateway, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"status": "opened"})
+	})
+	mux.HandleFunc("POST /v1/hardware/a4/print", func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			DocumentBase64 string `json:"document_base64"`
+		}
+		if err := decodeJSONLimit(r, &in, 12<<20); err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		if err := bridge.PrintA4PDF(r.Context(), in.DocumentBase64); err != nil {
+			writeError(w, http.StatusBadGateway, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"status": "queued"})
+	})
+	mux.HandleFunc("POST /v1/hardware/pos/charge", func(w http.ResponseWriter, r *http.Request) {
+		var in storeedge.POSCharge
+		if err := decodeJSON(r, &in); err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		out, err := bridge.ChargePOS(r.Context(), in)
+		if err != nil {
+			writeError(w, http.StatusBadGateway, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, out)
+	})
+
 	mux.HandleFunc("POST /v1/sync", func(w http.ResponseWriter, r *http.Request) {
 		requestCtx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 		defer cancel()
@@ -282,7 +373,10 @@ func localCORS(store *storeedge.Store, next http.Handler) http.Handler {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
 			w.Header().Set("Vary", "Origin")
 			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-AutoParts-Edge")
-			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, OPTIONS")
+			if strings.EqualFold(r.Header.Get("Access-Control-Request-Private-Network"), "true") {
+				w.Header().Set("Access-Control-Allow-Private-Network", "true")
+			}
 		}
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
@@ -307,6 +401,12 @@ func sameLoopbackOrigin(origin, requestHost string) bool {
 
 func decodeJSON(r *http.Request, dst any) error {
 	dec := json.NewDecoder(io.LimitReader(r.Body, 1<<20))
+	dec.DisallowUnknownFields()
+	return dec.Decode(dst)
+}
+
+func decodeJSONLimit(r *http.Request, dst any, limit int64) error {
+	dec := json.NewDecoder(io.LimitReader(r.Body, limit))
 	dec.DisallowUnknownFields()
 	return dec.Decode(dst)
 }

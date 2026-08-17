@@ -1,6 +1,6 @@
 param(
   [string]$OutDir = "dist",
-  [string]$Version = "0.15.7.1",
+  [string]$Version = "0.15.8",
   [ValidateSet("amd64", "arm64")][string]$Arch = "amd64"
 )
 $ErrorActionPreference = "Stop"
@@ -16,6 +16,7 @@ try {
   $env:GOARCH = $Arch
   go build -buildvcs=false -trimpath -ldflags "-s -w -X main.version=$Version" -o $exe ./cmd/store-edge
   if ($LASTEXITCODE -ne 0) { throw "Go build failed with exit code $LASTEXITCODE" }
+
 } finally { Pop-Location }
 
 $hash = (Get-FileHash -Algorithm SHA256 $exe).Hash.ToLowerInvariant()

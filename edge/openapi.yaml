@@ -1,0 +1,79 @@
+openapi: 3.1.0
+info:
+  title: AutoParts Store Edge Local API
+  version: 0.15.8
+  description: Loopback-only local API for offline sales continuity and store hardware bridging. This API is not the public cloud API.
+servers:
+  - url: http://127.0.0.1:17624
+paths:
+  /healthz:
+    get:
+      responses:
+        '200': {description: Agent health}
+  /v1/status:
+    get:
+      responses:
+        '200': {description: Pairing, sync queue, and local catalog status}
+  /v1/pair:
+    post:
+      description: Pair this local agent using a one-time cloud pair code.
+      responses:
+        '200': {description: Agent paired}
+  /v1/catalog:
+    get:
+      parameters:
+        - {in: query, name: q, schema: {type: string}}
+        - {in: query, name: limit, schema: {type: integer, minimum: 1, maximum: 100}}
+      responses:
+        '200': {description: Local cached products}
+  /v1/offline-sales:
+    get:
+      responses:
+        '200': {description: Local offline sale queue}
+    post:
+      description: Durably record a full cash/card sale on local disk.
+      responses:
+        '201': {description: Local sale accepted}
+        '409': {description: Local stock/payment validation failed}
+  /v1/sync:
+    post:
+      responses:
+        '200': {description: Pending sales replayed and snapshot refreshed}
+  /v1/hardware/config:
+    get:
+      responses:
+        '200': {description: Local hardware configuration}
+    put:
+      responses:
+        '200': {description: Hardware configuration saved atomically}
+  /v1/hardware/status:
+    get:
+      responses:
+        '200': {description: Configured hardware capabilities and platform}
+  /v1/hardware/receipt/print:
+    post:
+      description: Print a receipt using the configured receipt-printer adapter.
+      responses:
+        '200': {description: Print job sent}
+        '502': {description: Printer transport failed}
+  /v1/hardware/label/print:
+    post:
+      description: Print a label using ZPL or text/raw transport.
+      responses:
+        '200': {description: Label sent}
+  /v1/hardware/cash-drawer/open:
+    post:
+      description: Send an ESC/POS drawer pulse through the raw receipt-printer transport.
+      responses:
+        '200': {description: Pulse sent}
+  /v1/hardware/a4/print:
+    post:
+      description: Spool a base64 encoded PDF (up to 8MB) using the operating-system print path.
+      responses:
+        '200': {description: PDF queued to system spooler}
+  /v1/hardware/pos/charge:
+    post:
+      description: Charge through manual, QA mock, or a generic TCP JSON PSP adapter. Vendor/PSP-specific protocols require their own provider implementation.
+      responses:
+        '200': {description: POS provider result}
+        '502': {description: Provider/transport failure}

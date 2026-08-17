@@ -204,3 +204,10 @@ Phase 14 adds liveness/readiness/version endpoints, structured JSON HTTP logging
 ## Phase 15.6 — Adoption UX
 
 Phase 15.6 adds a network-value dashboard, action center, safe CSV migration/import flow, and saved-vehicle/recent-search UX for mechanic users. The import flow initializes only untouched opening inventory and preserves balances that already have operational history. See `PHASE_15_6_RUN.md`.
+
+
+## Phase 15.8 — Store Hardware Bridge
+
+Store Edge 0.15.8 علاوه بر فروش آفلاین، gateway محلی سخت‌افزار صندوق است: receipt/label/A4 printer، barcode keyboard-wedge، cash drawer و POS provider bridge. Installer تولیدی ویندوز از Phase 15.7.1 حفظ شده و نسخه 0.15.8 را به‌صورت Windows Service با auto-start نصب می‌کند. Pairing-origin fix فاز 15.7.1.1 نیز در این baseline ادغام شده است.
+
+Runbook: `PHASE_15_8_RUN.md`

@@ -6,7 +6,7 @@ on:
       version:
         description: Store Agent version
         required: true
-        default: 0.15.7.1
+        default: 0.15.8
   push:
     tags:
       - "store-agent-v*"
