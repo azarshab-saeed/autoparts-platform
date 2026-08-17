@@ -172,7 +172,7 @@ func (s *Service) list(ctx context.Context, side string, tenantID, storeID uuid.
 		return nil, err
 	}
 	defer rows.Close()
-	var out []Order
+	out := make([]Order, 0)
 	for rows.Next() {
 		var x Order
 		if err := scanOrder(rows, &x); err != nil {

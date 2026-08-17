@@ -216,10 +216,10 @@ export async function createNetworkProcurement(session:UserSession,input:{offerI
   return request<NetworkProcurement>("/v1/network/procurements",{method:"POST",headers:{"Idempotency-Key":crypto.randomUUID()},body:JSON.stringify({offer_id:input.offerId,buyer_product_id:input.buyerProductId,warehouse_id:session.warehouseId,qty:input.qty})},session.token);
 }
 export async function getBuyingProcurements(session:UserSession):Promise<NetworkProcurement[]>{
-  if(MOCK_MODE)return mockProcurements.filter(x=>x.buyer_store_id===session.storeId);const out=await request<{items:NetworkProcurement[]}>("/v1/network/procurements/buying",{},session.token);return out.items;
+  if(MOCK_MODE)return mockProcurements.filter(x=>x.buyer_store_id===session.storeId);const out=await request<{items:NetworkProcurement[]}>("/v1/network/procurements/buying",{},session.token);return out.items ?? [];
 }
 export async function getSellingProcurements(session:UserSession):Promise<NetworkProcurement[]>{
-  if(MOCK_MODE)return mockProcurements.filter(x=>x.seller_store_id===session.storeId);const out=await request<{items:NetworkProcurement[]}>("/v1/network/procurements/selling",{},session.token);return out.items;
+  if(MOCK_MODE)return mockProcurements.filter(x=>x.seller_store_id===session.storeId);const out=await request<{items:NetworkProcurement[]}>("/v1/network/procurements/selling",{},session.token);return out.items ?? [];
 }
 export async function transitionSellingProcurement(session:UserSession,id:string,status:"accepted"|"ready"|"rejected"):Promise<NetworkProcurement>{
   if(MOCK_MODE){let out=mockProcurements.find(x=>x.id===id)!;out={...out,status,updated_at:new Date().toISOString()};mockProcurements=mockProcurements.map(x=>x.id===id?out:x);return out;}
