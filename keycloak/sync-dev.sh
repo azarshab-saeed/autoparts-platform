@@ -77,13 +77,17 @@ ensure_user() {
   fi
 
   if [ -n "$tenant_id" ] && [ -n "$store_id" ]; then
+    # Keycloak 26 disables unmanaged attributes by default. The realm sync
+    # enables ADMIN_EDIT below, so these server-owned identity claims can be
+    # written by the Admin API but remain unavailable to end-user profile edits.
     "$KCADM" update "users/$uid" -r "$REALM" \
       -s enabled=true \
       -s emailVerified=true \
       -s "email=$email" \
       -s "firstName=$first_name" \
       -s "lastName=$last_name" \
-      -s "attributes={\"tenant_id\":[\"$tenant_id\"],\"store_id\":[\"$store_id\"]}" >/dev/null
+      -s "attributes.tenant_id=[\"$tenant_id\"]" \
+      -s "attributes.store_id=[\"$store_id\"]" >/dev/null
   else
     "$KCADM" update "users/$uid" -r "$REALM" \
       -s enabled=true \
@@ -182,6 +186,18 @@ login_admin
 
 if ! "$KCADM" get "realms/$REALM" >/dev/null 2>&1; then
   log "realm '$REALM' does not exist; realm import must complete first"
+  exit 1
+fi
+
+# Keycloak 26 user profile ignores attributes that are not explicitly managed
+# unless an unmanaged-attribute policy allows them. tenant_id/store_id are
+# backend-owned claims, so allow only administrators to read/write unmanaged
+# attributes. This is stricter than enabling them for end users.
+log "configuring admin-only custom user attributes"
+"$KCADM" update "users/profile" -r "$REALM" -s unmanagedAttributePolicy=ADMIN_EDIT >/dev/null
+PROFILE_POLICY="$("$KCADM" get "users/profile" -r "$REALM" --fields unmanagedAttributePolicy --format csv --noquotes 2>/dev/null | head -n 1)"
+if [ "$PROFILE_POLICY" != "ADMIN_EDIT" ]; then
+  log "user profile policy verification failed: expected ADMIN_EDIT, got ${PROFILE_POLICY:-<empty>}"
   exit 1
 fi
 
