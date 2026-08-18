@@ -12,7 +12,7 @@ WORKER_BIN="$BIN_DIR/autoparts-store-edge"
 UPDATER_BIN="$BIN_DIR/autoparts-store-edge-updater"
 MANAGER_UNIT="$UNIT_DIR/autoparts-store-edge-manager.service"
 LEGACY_UNIT="$UNIT_DIR/autoparts-store-edge.service"
-VERSION="0.15.8.1"
+VERSION="0.15.8.2"
 mkdir -p "$BIN_DIR" "$DATA_DIR" "$UNIT_DIR" "$CONF_DIR"
 chmod 700 "$CONF_DIR"
 
@@ -27,6 +27,7 @@ fi
   MANAGER_LDFLAGS="-s -w -X main.version=$VERSION"
   if [ -n "${AUTOPARTS_EDGE_UPDATE_MANIFEST_URL:-}" ]; then MANAGER_LDFLAGS="$MANAGER_LDFLAGS -X main.defaultUpdateManifestURL=${AUTOPARTS_EDGE_UPDATE_MANIFEST_URL}"; fi
   if [ -n "${AUTOPARTS_EDGE_UPDATE_PUBLIC_KEY:-}" ]; then MANAGER_LDFLAGS="$MANAGER_LDFLAGS -X main.defaultUpdatePublicKey=${AUTOPARTS_EDGE_UPDATE_PUBLIC_KEY}"; fi
+  if [ -n "${AUTOPARTS_EDGE_ALLOWED_ORIGINS:-}" ]; then MANAGER_LDFLAGS="$MANAGER_LDFLAGS -X main.defaultAllowedOrigins=${AUTOPARTS_EDGE_ALLOWED_ORIGINS}"; fi
   CGO_ENABLED=0 go build -buildvcs=false -trimpath -ldflags "$MANAGER_LDFLAGS" -o "$MANAGER_BIN" ./cmd/store-edge-manager
   CGO_ENABLED=0 go build -buildvcs=false -trimpath -ldflags "-s -w" -o "$UPDATER_BIN" ./cmd/store-edge-updater
 )

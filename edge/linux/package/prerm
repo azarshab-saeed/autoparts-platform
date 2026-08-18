@@ -1,0 +1,16 @@
+#!/bin/sh
+set -eu
+UNIT=autoparts-store-edge-manager.service
+if [ "${1:-}" = remove ]; then
+  if command -v loginctl >/dev/null 2>&1; then
+    loginctl list-users --no-legend 2>/dev/null | awk '{print $1}' | while read -r uid; do
+      [ "$uid" -ge 1000 ] 2>/dev/null || continue
+      user=$(getent passwd "$uid" | cut -d: -f1)
+      runtime="/run/user/$uid"
+      [ -n "$user" ] && [ -d "$runtime" ] || continue
+      runuser -u "$user" -- env XDG_RUNTIME_DIR="$runtime" DBUS_SESSION_BUS_ADDRESS="unix:path=$runtime/bus" systemctl --user disable --now "$UNIT" >/dev/null 2>&1 || true
+    done
+  fi
+  systemctl --global disable "$UNIT" >/dev/null 2>&1 || true
+fi
+exit 0

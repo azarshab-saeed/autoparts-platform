@@ -215,3 +215,7 @@ Runbook: `PHASE_15_8_RUN.md`
 ## Phase 15.8.1 — Store Agent Lifecycle Manager
 
 Store Edge دیگر مستقیماً به‌عنوان process/service قابل توقف اجرا نمی‌شود. یک Manager محلی روی `127.0.0.1:17623` همیشه فعال می‌ماند و Worker فروش آفلاین/سخت‌افزار روی `127.0.0.1:17624` را Start/Stop/Restart می‌کند. صفحه `/store/edge` lifecycle را برای Windows و Linux مدیریت می‌کند و مسیر بروزرسانی امضاشده SHA-256 + Ed25519 نیز اضافه شده است. Runbook: `PHASE_15_8_1_RUN.md`.
+
+## Phase 15.8.1.1 — One-click Agent Bootstrap
+
+`/store/edge` حالا قبل از نصب Manager سیستم‌عامل/معماری را تشخیص می‌دهد و Installer رسمی Windows یا Linux را پیشنهاد می‌کند. Windows x64 با Setup امضاشدنی و Linux Debian/Ubuntu با DEB روی amd64/arm64 پوشش داده می‌شوند. بعد از تأیید نصب توسط خود سیستم‌عامل، صفحه به‌صورت خودکار Manager را روی loopback پیدا می‌کند و تمام Start/Stop/Restart/Update از همان UI انجام می‌شود. Release assets با tagهای `store-agent-v*` تولید و روی GitHub Release منتشر می‌شوند. Runbook: `PHASE_15_8_1_1_RUN.md`.

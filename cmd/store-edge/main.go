@@ -22,7 +22,7 @@ import (
 	"github.com/example/autoparts-core/internal/storeedge"
 )
 
-var version = "0.15.8.1"
+var version = "0.15.8.2"
 
 const windowsServiceName = "AutoPartsStoreEdge"
 

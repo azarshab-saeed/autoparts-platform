@@ -1,5 +1,5 @@
 param(
-  [string]$Version = "0.15.8.1",
+  [string]$Version = "0.15.8.2",
   [ValidateSet("amd64")][string]$Arch = "amd64"
 )
 $ErrorActionPreference = "Stop"
@@ -36,3 +36,9 @@ $hash = (Get-FileHash -Algorithm SHA256 $setup).Hash.ToLowerInvariant()
 Write-Host "Release installer: $setup"
 Write-Host "SHA256: $hash"
 if (-not $thumbprint.Trim()) { Write-Warning "Installer is unsigned. Sign customer releases by setting AUTOPARTS_SIGN_CERT_SHA1 on the release machine." }
+
+$stableSetup = Join-Path $dist "AutoParts-Store-Agent-Setup-windows-x64.exe"
+Copy-Item $setup $stableSetup -Force
+$stableHash = (Get-FileHash -Algorithm SHA256 $stableSetup).Hash.ToLowerInvariant()
+"$stableHash  $(Split-Path $stableSetup -Leaf)" | Set-Content -Encoding ASCII "$stableSetup.sha256"
+Write-Host "Stable installer alias: $stableSetup"

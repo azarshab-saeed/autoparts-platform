@@ -1,4 +1,4 @@
-name: Store Agent Windows Installer
+name: Store Agent Installers
 
 on:
   workflow_dispatch:
@@ -6,31 +6,30 @@ on:
       version:
         description: Store Agent version
         required: true
-        default: 0.15.8.1
+        default: 0.15.8.2
   push:
     tags:
       - "store-agent-v*"
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   windows-installer:
     runs-on: windows-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     env:
       CODE_SIGN_PFX_BASE64: ${{ secrets.WINDOWS_CODE_SIGN_PFX_BASE64 }}
       CODE_SIGN_PFX_PASSWORD: ${{ secrets.WINDOWS_CODE_SIGN_PFX_PASSWORD }}
       AUTOPARTS_EDGE_UPDATE_MANIFEST_URL: ${{ vars.STORE_AGENT_UPDATE_MANIFEST_URL }}
       AUTOPARTS_EDGE_UPDATE_PUBLIC_KEY: ${{ vars.STORE_AGENT_UPDATE_PUBLIC_KEY }}
+      AUTOPARTS_EDGE_ALLOWED_ORIGINS: ${{ vars.STORE_AGENT_ALLOWED_ORIGINS }}
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-go@v5
         with:
           go-version: "1.23.x"
           cache: true
-
       - name: Resolve version
         shell: pwsh
         run: |
@@ -41,18 +40,15 @@ jobs:
           }
           if (-not $version) { throw "Store Agent version is empty" }
           "STORE_AGENT_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-
       - name: Test Store Edge
         shell: pwsh
         run: |
           go test ./internal/storeedge
           go test ./cmd/store-edge
           go test ./cmd/store-edge-manager ./cmd/store-edge-updater ./cmd/store-edge-manifest ./internal/storeedgemanager
-
       - name: Install Inno Setup
         shell: pwsh
         run: choco install innosetup --yes --no-progress
-
       - name: Import optional code-signing certificate
         if: ${{ env.CODE_SIGN_PFX_BASE64 != '' }}
         shell: pwsh
@@ -67,21 +63,87 @@ jobs:
           if (-not $cert.Thumbprint) { throw "Code-signing certificate import failed" }
           "AUTOPARTS_SIGN_CERT_SHA1=$($cert.Thumbprint)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           Remove-Item $pfx -Force
-
       - name: Build installer
         shell: pwsh
         run: powershell -ExecutionPolicy Bypass -File edge/windows/build-installer.ps1 -Version $env:STORE_AGENT_VERSION
-
-      - name: Upload customer installer
+      - name: Upload Windows installer
         uses: actions/upload-artifact@v4
         with:
-          name: AutoParts-Store-Agent-Setup-${{ env.STORE_AGENT_VERSION }}
+          name: store-agent-windows
           path: |
-            dist/AutoParts-Store-Agent-Setup-${{ env.STORE_AGENT_VERSION }}.exe
-            dist/AutoParts-Store-Agent-Setup-${{ env.STORE_AGENT_VERSION }}.exe.sha256
-            dist/AutoPartsStoreEdge.exe
-            dist/AutoPartsStoreEdgeManager.exe
-            dist/AutoPartsStoreEdgeUpdater.exe
-            dist/*.sha256
+            dist/AutoParts-Store-Agent-Setup-*.exe
+            dist/AutoParts-Store-Agent-Setup-*.exe.sha256
+            dist/AutoParts-Store-Agent-Setup-windows-x64.exe
+            dist/AutoParts-Store-Agent-Setup-windows-x64.exe.sha256
           if-no-files-found: error
           retention-days: 30
+
+  linux-installer:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      matrix:
+        arch: [amd64, arm64]
+    env:
+      AUTOPARTS_EDGE_UPDATE_MANIFEST_URL: ${{ vars.STORE_AGENT_UPDATE_MANIFEST_URL }}
+      AUTOPARTS_EDGE_UPDATE_PUBLIC_KEY: ${{ vars.STORE_AGENT_UPDATE_PUBLIC_KEY }}
+      AUTOPARTS_EDGE_ALLOWED_ORIGINS: ${{ vars.STORE_AGENT_ALLOWED_ORIGINS }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.23.x"
+          cache: true
+      - name: Resolve version
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            version="${{ inputs.version }}"
+          else
+            version="${GITHUB_REF_NAME#store-agent-v}"
+          fi
+          test -n "$version"
+          echo "STORE_AGENT_VERSION=$version" >> "$GITHUB_ENV"
+      - name: Test Linux packager
+        run: go test ./cmd/store-edge-manager ./cmd/store-edge-updater ./internal/storeedgemanager
+      - name: Build DEB
+        run: VERSION="$STORE_AGENT_VERSION" ARCH="${{ matrix.arch }}" ./edge/linux/build-deb.sh
+      - name: Inspect DEB
+        run: |
+          dpkg-deb --info "dist/autoparts-store-agent_${STORE_AGENT_VERSION}_${{ matrix.arch }}.deb"
+          dpkg-deb --contents "dist/autoparts-store-agent_${STORE_AGENT_VERSION}_${{ matrix.arch }}.deb" | grep autoparts-store-edge-manager.service
+      - name: Upload Linux installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: store-agent-linux-${{ matrix.arch }}
+          path: |
+            dist/autoparts-store-agent_*_${{ matrix.arch }}.deb
+            dist/autoparts-store-agent_*_${{ matrix.arch }}.deb.sha256
+            dist/autoparts-store-agent-linux-${{ matrix.arch }}.deb
+            dist/autoparts-store-agent-linux-${{ matrix.arch }}.deb.sha256
+          if-no-files-found: error
+          retention-days: 30
+
+  release-assets:
+    if: startsWith(github.ref, 'refs/tags/store-agent-v')
+    needs: [windows-installer, linux-installer]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+      - name: Publish GitHub Release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="$GITHUB_REF_NAME"
+          version="${tag#store-agent-v}"
+          if ! gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create "$tag" --repo "$GITHUB_REPOSITORY" --title "AutoParts Store Agent $version" --notes "Store Agent $version customer installers for Windows and Linux."
+          fi
+          assets="$(find release-assets -type f \( -name '*.exe' -o -name '*.deb' -o -name '*.sha256' \) -print)"
+          test -n "$assets"
+          # shellcheck disable=SC2086
+          gh release upload "$tag" $assets --repo "$GITHUB_REPOSITORY" --clobber

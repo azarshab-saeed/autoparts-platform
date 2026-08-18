@@ -1,0 +1,15 @@
+[Unit]
+Description=AutoParts Store Agent Lifecycle Manager
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/lib/autoparts-store-edge/autoparts-store-edge-launcher
+Restart=always
+RestartSec=4
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=default.target

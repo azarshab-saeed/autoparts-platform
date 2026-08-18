@@ -1,0 +1,39 @@
+#!/bin/sh
+set -eu
+UNIT=autoparts-store-edge-manager.service
+LEGACY_UNIT=autoparts-store-edge.service
+systemctl --global enable "$UNIT" >/dev/null 2>&1 || true
+
+start_for_uid() {
+  uid="$1"
+  [ -n "$uid" ] || return 0
+  [ "$uid" -ge 1000 ] 2>/dev/null || return 0
+  entry=$(getent passwd "$uid" || true)
+  user=$(printf '%s' "$entry" | cut -d: -f1)
+  home=$(printf '%s' "$entry" | cut -d: -f6)
+  [ -n "$user" ] && [ -n "$home" ] || return 0
+  runtime="/run/user/$uid"
+  [ -d "$runtime" ] || return 0
+  env_cmd="XDG_RUNTIME_DIR=$runtime"
+  bus_cmd="DBUS_SESSION_BUS_ADDRESS=unix:path=$runtime/bus"
+
+  local_manager_unit="$home/.config/systemd/user/$UNIT"
+  local_legacy_unit="$home/.config/systemd/user/$LEGACY_UNIT"
+  if [ -f "$local_manager_unit" ] && grep -q '/.local/bin/autoparts-store-edge-manager' "$local_manager_unit" 2>/dev/null; then
+    runuser -u "$user" -- env "$env_cmd" "$bus_cmd" systemctl --user disable --now "$UNIT" >/dev/null 2>&1 || true
+    rm -f "$local_manager_unit"
+  fi
+  if [ -f "$local_legacy_unit" ]; then
+    runuser -u "$user" -- env "$env_cmd" "$bus_cmd" systemctl --user disable --now "$LEGACY_UNIT" >/dev/null 2>&1 || true
+    rm -f "$local_legacy_unit"
+  fi
+
+  runuser -u "$user" -- env "$env_cmd" "$bus_cmd" systemctl --user daemon-reload >/dev/null 2>&1 || true
+  runuser -u "$user" -- env "$env_cmd" "$bus_cmd" systemctl --user enable "$UNIT" >/dev/null 2>&1 || true
+  runuser -u "$user" -- env "$env_cmd" "$bus_cmd" systemctl --user restart "$UNIT" >/dev/null 2>&1 || true
+}
+
+if command -v loginctl >/dev/null 2>&1; then
+  loginctl list-users --no-legend 2>/dev/null | awk '{print $1}' | while read -r uid; do start_for_uid "$uid"; done
+fi
+exit 0

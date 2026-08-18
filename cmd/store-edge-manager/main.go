@@ -21,9 +21,10 @@ import (
 )
 
 var (
-	version                  = "0.15.8.1"
+	version                  = "0.15.8.2"
 	defaultUpdateManifestURL = ""
 	defaultUpdatePublicKey   = ""
+	defaultAllowedOrigins    = ""
 )
 
 const (
@@ -219,9 +220,11 @@ func managerCORS(dataDir string, next http.Handler) http.Handler {
 		"http://localhost:3000": true,
 		"http://127.0.0.1:3000": true,
 	}
-	for _, v := range strings.Split(os.Getenv("AUTOPARTS_EDGE_ALLOWED_ORIGINS"), ",") {
-		if x := strings.TrimSpace(v); x != "" {
-			allowed[x] = true
+	for _, source := range []string{defaultAllowedOrigins, os.Getenv("AUTOPARTS_EDGE_ALLOWED_ORIGINS")} {
+		for _, v := range strings.Split(source, ",") {
+			if x := strings.TrimSpace(v); x != "" {
+				allowed[x] = true
+			}
 		}
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -1,6 +1,6 @@
 param(
   [string]$OutDir = "dist",
-  [string]$Version = "0.15.8.1",
+  [string]$Version = "0.15.8.2",
   [ValidateSet("amd64", "arm64")][string]$Arch = "amd64"
 )
 $ErrorActionPreference = "Stop"
@@ -13,6 +13,7 @@ $updater = Join-Path $out "AutoPartsStoreEdgeUpdater.exe"
 
 $manifestUrl = [string]$env:AUTOPARTS_EDGE_UPDATE_MANIFEST_URL
 $publicKey = [string]$env:AUTOPARTS_EDGE_UPDATE_PUBLIC_KEY
+$allowedOrigins = [string]$env:AUTOPARTS_EDGE_ALLOWED_ORIGINS
 
 Push-Location $root
 try {
@@ -25,6 +26,7 @@ try {
   $managerLdflags = "-s -w -X main.version=$Version"
   if ($manifestUrl.Trim()) { $managerLdflags += " -X main.defaultUpdateManifestURL=$($manifestUrl.Trim())" }
   if ($publicKey.Trim()) { $managerLdflags += " -X main.defaultUpdatePublicKey=$($publicKey.Trim())" }
+  if ($allowedOrigins.Trim()) { $managerLdflags += " -X main.defaultAllowedOrigins=$($allowedOrigins.Trim())" }
   go build -buildvcs=false -trimpath -ldflags $managerLdflags -o $manager ./cmd/store-edge-manager
   if ($LASTEXITCODE -ne 0) { throw "Store Edge Manager build failed with exit code $LASTEXITCODE" }
 

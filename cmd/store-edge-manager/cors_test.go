@@ -44,3 +44,18 @@ func TestManagerCORSAllowsPairedCloudOrigin(t *testing.T) {
 		t.Fatalf("paired origin => %d", rr.Code)
 	}
 }
+
+func TestManagerCORSAllowsReleaseConfiguredOrigin(t *testing.T) {
+	old := defaultAllowedOrigins
+	defaultAllowedOrigins = "https://store.autoparts.example,https://backup.autoparts.example"
+	defer func() { defaultAllowedOrigins = old }()
+	h := managerCORS(t.TempDir(), http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) }))
+	req := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:17623/v1/lifecycle/start", nil)
+	req.Header.Set("Origin", "https://store.autoparts.example")
+	req.Header.Set("X-AutoParts-Edge", "1")
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("release configured origin => %d", rr.Code)
+	}
+}

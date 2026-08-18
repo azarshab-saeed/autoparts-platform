@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: AutoParts Store Edge Lifecycle Manager API
-  version: 0.15.8.1
+  version: 0.15.8.2
   description: Local loopback control-plane API for Store Edge start/stop/restart and signed updates.
 servers:
   - url: http://127.0.0.1:17623
