@@ -204,8 +204,8 @@ export function getMockPartyStatement(type:"customer"|"supplier",id:string):Part
 
 const todayISO=()=>new Date().toISOString().slice(0,10);
 const mockSalesHistory:SaleHistoryItem[]=[
-  {id:mockSaleDetail.id,customer_id:mockCustomers[0].id,customer_name:mockCustomers[0].name,gross_amount:3800000,discount_amount:240000,total_amount:3560000,paid_amount:2000000,due_amount:1560000,status:"posted",created_at:new Date().toISOString(),line_count:1,total_qty:2,below_margin_count:1,below_margin_count:0,network_source:false},
-  {id:"99999999-9999-9999-9999-999999999993",customer_id:mockCustomers[2].id,customer_name:mockCustomers[2].name,gross_amount:900000,discount_amount:60000,total_amount:840000,paid_amount:840000,due_amount:0,status:"posted",created_at:new Date(Date.now()-3600_000).toISOString(),line_count:1,total_qty:2,network_source:false},
+  {id:mockSaleDetail.id,customer_id:mockCustomers[0].id,customer_name:mockCustomers[0].name,gross_amount:3800000,discount_amount:240000,total_amount:3560000,paid_amount:2000000,due_amount:1560000,status:"posted",created_at:new Date().toISOString(),line_count:1,total_qty:2,below_margin_count:1,network_source:false},
+  {id:"99999999-9999-9999-9999-999999999993",customer_id:mockCustomers[2].id,customer_name:mockCustomers[2].name,gross_amount:900000,discount_amount:60000,total_amount:840000,paid_amount:840000,due_amount:0,status:"posted",created_at:new Date(Date.now()-3600_000).toISOString(),line_count:1,total_qty:2,below_margin_count:0,network_source:false},
   {id:"99999999-9999-9999-9999-999999999994",customer_id:mockCustomers[1].id,customer_name:mockCustomers[1].name,gross_amount:3150000,discount_amount:0,total_amount:3150000,paid_amount:3150000,due_amount:0,status:"posted",created_at:new Date(Date.now()-7200_000).toISOString(),line_count:1,total_qty:1,below_margin_count:0,network_source:true}
 ];
 const mockPurchasesHistory:PurchaseHistoryItem[]=[
