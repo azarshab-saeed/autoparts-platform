@@ -116,28 +116,74 @@ func (s *Service) Snapshot(ctx context.Context, d Device) (Snapshot, error) {
 	if err := s.db.QueryRow(ctx, `SELECT name FROM stores WHERE id=$1 AND tenant_id=$2`, d.StoreID, d.TenantID).Scan(&out.StoreName); err != nil {
 		return Snapshot{}, err
 	}
+	var cashierMayOverride bool
+	err := s.db.QueryRow(ctx, `SELECT cashier_may_override FROM store_pricing_settings WHERE tenant_id=$1 AND store_id=$2`, d.TenantID, d.StoreID).Scan(&cashierMayOverride)
+	if errors.Is(err, pgx.ErrNoRows) {
+		cashierMayOverride = true
+	} else if err != nil {
+		return Snapshot{}, err
+	}
+	out.PricingPolicy = &SnapshotPricingPolicy{CashierMayOverride: cashierMayOverride}
 	rows, err := s.db.Query(ctx, `
 		SELECT p.id,p.title,COALESCE(p.sku,''),COALESCE(p.brand,''),COALESCE(p.oem_code,''),COALESCE(p.barcode,''),
 		       ib.on_hand::float8,ib.reserved::float8,(ib.on_hand-ib.reserved)::float8,
-		       COALESCE(o.selling_price,0)::bigint,ib.updated_at
+		       COALESCE(local_price.unit_price,o.selling_price,0)::bigint,ib.updated_at
 		FROM products p
 		JOIN inventory_balances ib ON ib.tenant_id=p.tenant_id AND ib.product_id=p.id AND ib.warehouse_id=$3
+		LEFT JOIN LATERAL (
+		  SELECT ppb.unit_price
+		  FROM price_lists pl
+		  JOIN product_price_breaks ppb ON ppb.price_list_id=pl.id AND ppb.tenant_id=pl.tenant_id AND ppb.store_id=pl.store_id AND ppb.product_id=p.id
+		  WHERE pl.tenant_id=p.tenant_id AND pl.store_id=$2 AND pl.is_default AND pl.active AND ppb.min_qty<=1
+		  ORDER BY ppb.min_qty DESC LIMIT 1
+		) local_price ON true
 		LEFT JOIN store_product_offers o ON o.tenant_id=p.tenant_id AND o.store_id=$2 AND o.warehouse_id=$3 AND o.product_id=p.id
 		WHERE p.tenant_id=$1 AND p.active AND p.deleted_at IS NULL
 		ORDER BY lower(p.title),p.id`, d.TenantID, d.StoreID, d.WarehouseID)
 	if err != nil {
 		return Snapshot{}, err
 	}
-	defer rows.Close()
 	out.Products = make([]SnapshotProduct, 0)
 	for rows.Next() {
 		var p SnapshotProduct
 		if err := rows.Scan(&p.ProductID, &p.Title, &p.SKU, &p.Brand, &p.OEMCode, &p.Barcode, &p.OnHand, &p.Reserved, &p.Available, &p.SellingPrice, &p.UpdatedAt); err != nil {
+			rows.Close()
 			return Snapshot{}, err
 		}
 		out.Products = append(out.Products, p)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return Snapshot{}, err
+	}
+	rows.Close()
+
+	breakRows, err := s.db.Query(ctx, `
+		SELECT ppb.product_id,ppb.min_qty::float8,ppb.unit_price
+		FROM price_lists pl
+		JOIN product_price_breaks ppb ON ppb.price_list_id=pl.id AND ppb.tenant_id=pl.tenant_id AND ppb.store_id=pl.store_id
+		WHERE pl.tenant_id=$1 AND pl.store_id=$2 AND pl.is_default AND pl.active
+		ORDER BY ppb.product_id,ppb.min_qty`, d.TenantID, d.StoreID)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	defer breakRows.Close()
+	byProduct := make(map[uuid.UUID][]SnapshotPriceBreak)
+	for breakRows.Next() {
+		var productID uuid.UUID
+		var b SnapshotPriceBreak
+		if err := breakRows.Scan(&productID, &b.MinQty, &b.UnitPrice); err != nil {
+			return Snapshot{}, err
+		}
+		byProduct[productID] = append(byProduct[productID], b)
+	}
+	if err := breakRows.Err(); err != nil {
+		return Snapshot{}, err
+	}
+	for i := range out.Products {
+		out.Products[i].PriceBreaks = byProduct[out.Products[i].ProductID]
+	}
+	return out, nil
 }
 
 func (s *Service) ListDevices(ctx context.Context, tenantID, storeID uuid.UUID) ([]Device, error) {

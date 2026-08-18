@@ -3,17 +3,20 @@ package operations
 import "github.com/google/uuid"
 
 type SaleListItem struct {
-	ID            uuid.UUID  `json:"id"`
-	CustomerID    *uuid.UUID `json:"customer_id,omitempty"`
-	CustomerName  string     `json:"customer_name,omitempty"`
-	TotalAmount   int64      `json:"total_amount"`
-	PaidAmount    int64      `json:"paid_amount"`
-	DueAmount     int64      `json:"due_amount"`
-	Status        string     `json:"status"`
-	CreatedAt     string     `json:"created_at"`
-	LineCount     int        `json:"line_count"`
-	TotalQty      float64    `json:"total_qty"`
-	NetworkSource bool       `json:"network_source"`
+	ID               uuid.UUID  `json:"id"`
+	CustomerID       *uuid.UUID `json:"customer_id,omitempty"`
+	CustomerName     string     `json:"customer_name,omitempty"`
+	GrossAmount      int64      `json:"gross_amount"`
+	DiscountAmount   int64      `json:"discount_amount"`
+	TotalAmount      int64      `json:"total_amount"`
+	PaidAmount       int64      `json:"paid_amount"`
+	DueAmount        int64      `json:"due_amount"`
+	Status           string     `json:"status"`
+	CreatedAt        string     `json:"created_at"`
+	LineCount        int        `json:"line_count"`
+	TotalQty         float64    `json:"total_qty"`
+	BelowMarginCount int        `json:"below_margin_count"`
+	NetworkSource    bool       `json:"network_source"`
 }
 
 type PurchaseListItem struct {

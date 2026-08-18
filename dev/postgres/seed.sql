@@ -121,3 +121,67 @@ INSERT INTO product_fitments(tenant_id,product_id,vehicle_variant_id,year_from,y
  ('11111111-1111-1111-1111-111111111113','55555555-5555-5555-5555-555555555571','92000000-0000-0000-0000-000000000001',1380,1400,'محور جلو'),
  ('11111111-1111-1111-1111-111111111113','55555555-5555-5555-5555-555555555572','92000000-0000-0000-0000-000000000004',1388,1402,'موتور EF7')
 ON CONFLICT(tenant_id,product_id,vehicle_variant_id,year_from,year_to) DO UPDATE SET notes=EXCLUDED.notes,updated_at=now();
+
+-- Phase 15.11: advanced local pricing. Network offer prices remain independent.
+INSERT INTO price_lists(tenant_id,store_id,code,name,is_default,active)
+SELECT s.tenant_id,s.id,'retail','خرده / مصرف‌کننده',false,true FROM stores s
+ON CONFLICT(tenant_id,store_id,code) DO UPDATE SET name=EXCLUDED.name,active=true,updated_at=now();
+UPDATE price_lists pl SET is_default=true,updated_at=now()
+WHERE pl.code='retail' AND pl.active
+  AND NOT EXISTS (SELECT 1 FROM price_lists x WHERE x.tenant_id=pl.tenant_id AND x.store_id=pl.store_id AND x.is_default AND x.active);
+INSERT INTO store_pricing_settings(tenant_id,store_id,min_margin_bps,cashier_may_override)
+SELECT s.tenant_id,s.id,1000,true FROM stores s
+ON CONFLICT(tenant_id,store_id) DO NOTHING;
+
+INSERT INTO price_lists(tenant_id,store_id,code,name,is_default,active) VALUES
+ ('11111111-1111-1111-1111-111111111111','22222222-2222-2222-2222-222222222222','mechanic','مکانیک',false,true),
+ ('11111111-1111-1111-1111-111111111111','22222222-2222-2222-2222-222222222222','wholesale','عمده',false,true)
+ON CONFLICT(tenant_id,store_id,code) DO UPDATE SET name=EXCLUDED.name,active=true,updated_at=now();
+
+INSERT INTO product_price_breaks(tenant_id,store_id,product_id,price_list_id,min_qty,unit_price)
+SELECT DISTINCT ON (o.tenant_id,o.store_id,o.product_id)
+       o.tenant_id,o.store_id,o.product_id,pl.id,1,o.selling_price
+FROM store_product_offers o
+JOIN price_lists pl ON pl.tenant_id=o.tenant_id AND pl.store_id=o.store_id AND pl.code='retail' AND pl.active
+ORDER BY o.tenant_id,o.store_id,o.product_id,o.updated_at DESC,o.id DESC
+ON CONFLICT(tenant_id,store_id,product_id,price_list_id,min_qty)
+DO UPDATE SET unit_price=EXCLUDED.unit_price,updated_at=now();
+
+-- Demo local prices include quantity breaks; these do not change public network prices.
+INSERT INTO product_price_breaks(tenant_id,store_id,product_id,price_list_id,min_qty,unit_price)
+SELECT '11111111-1111-1111-1111-111111111111','22222222-2222-2222-2222-222222222222',v.product_id,pl.id,v.min_qty,v.unit_price
+FROM (VALUES
+ ('55555555-5555-5555-5555-555555555551'::uuid,1::numeric,1710000::bigint),
+ ('55555555-5555-5555-5555-555555555551'::uuid,5::numeric,1660000::bigint),
+ ('55555555-5555-5555-5555-555555555551'::uuid,10::numeric,1610000::bigint),
+ ('55555555-5555-5555-5555-555555555552'::uuid,1::numeric,315000::bigint),
+ ('55555555-5555-5555-5555-555555555552'::uuid,10::numeric,295000::bigint),
+ ('55555555-5555-5555-5555-555555555553'::uuid,1::numeric,1530000::bigint),
+ ('55555555-5555-5555-5555-555555555553'::uuid,5::numeric,1490000::bigint)
+) AS v(product_id,min_qty,unit_price)
+JOIN price_lists pl ON pl.tenant_id='11111111-1111-1111-1111-111111111111' AND pl.store_id='22222222-2222-2222-2222-222222222222' AND pl.code='mechanic'
+ON CONFLICT(tenant_id,store_id,product_id,price_list_id,min_qty)
+DO UPDATE SET unit_price=EXCLUDED.unit_price,updated_at=now();
+
+INSERT INTO product_price_breaks(tenant_id,store_id,product_id,price_list_id,min_qty,unit_price)
+SELECT '11111111-1111-1111-1111-111111111111','22222222-2222-2222-2222-222222222222',v.product_id,pl.id,v.min_qty,v.unit_price
+FROM (VALUES
+ ('55555555-5555-5555-5555-555555555551'::uuid,1::numeric,1660000::bigint),
+ ('55555555-5555-5555-5555-555555555551'::uuid,10::numeric,1580000::bigint),
+ ('55555555-5555-5555-5555-555555555552'::uuid,1::numeric,300000::bigint),
+ ('55555555-5555-5555-5555-555555555552'::uuid,20::numeric,275000::bigint),
+ ('55555555-5555-5555-5555-555555555553'::uuid,1::numeric,1490000::bigint),
+ ('55555555-5555-5555-5555-555555555553'::uuid,10::numeric,1440000::bigint)
+) AS v(product_id,min_qty,unit_price)
+JOIN price_lists pl ON pl.tenant_id='11111111-1111-1111-1111-111111111111' AND pl.store_id='22222222-2222-2222-2222-222222222222' AND pl.code='wholesale'
+ON CONFLICT(tenant_id,store_id,product_id,price_list_id,min_qty)
+DO UPDATE SET unit_price=EXCLUDED.unit_price,updated_at=now();
+
+UPDATE customers c SET price_list_id=pl.id,updated_at=now()
+FROM price_lists pl
+WHERE c.id='66666666-6666-6666-6666-666666666661'
+  AND pl.tenant_id=c.tenant_id AND pl.store_id=c.store_id AND pl.code='mechanic';
+UPDATE customers c SET price_list_id=pl.id,updated_at=now()
+FROM price_lists pl
+WHERE c.id='66666666-6666-6666-6666-666666666662'
+  AND pl.tenant_id=c.tenant_id AND pl.store_id=c.store_id AND pl.code='wholesale';

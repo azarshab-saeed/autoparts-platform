@@ -63,7 +63,7 @@ export type ProductImportResult = {
   rows: { row_number: number; product_id: string; product_action: "created"|"updated"; inventory_action: "initialized"|"preserved"|"none"; offer_action: "upserted"|"none"; note?: string }[];
 };
 
-export type Customer = { id: string; name: string; phone?: string; code?: string };
+export type Customer = { id: string; name: string; phone?: string; code?: string; price_list_id?: string; price_list_name?: string };
 export type Supplier = { id: string; name: string; phone?: string; code?: string; notes?: string };
 
 export type InventoryStock = {
@@ -79,7 +79,11 @@ export type InventoryStock = {
   low_stock: boolean;
 };
 
-export type SaleItem = { product: Product; qty: number; unitPrice: number };
+export type SaleItem = {
+  product: Product; qty: number; unitPrice: number;
+  suggestedPrice?: number; minAllowedPrice?: number; priceListId?: string; priceListName?: string; priceSource?: string;
+  manualPrice?: boolean; overrideReason?: string; lineDiscountAmount?: number;
+};
 export type PurchaseItem = { product: Product; qty: number; unitCost: number };
 
 export type PurchaseResult = {
@@ -94,6 +98,14 @@ export type InventoryAdjustmentResult = {
   id: string;
   status: string;
 };
+
+
+export type PriceList = { id:string; code:string; name:string; is_default:boolean; active:boolean };
+export type PricingSettings = { min_margin_bps:number; cashier_may_override:boolean };
+export type PriceBreak = { min_qty:number; unit_price:number };
+export type ProductPricing = { product_id:string; title:string; sku?:string; brand?:string; breaks:PriceBreak[] };
+export type PricingQuoteLine = { product_id:string; qty:number; price_list_id?:string; price_list_name?:string; unit_price:number; price_source:string; min_allowed_price:number };
+export type PricingQuote = { price_list_id:string; price_list_name:string; min_margin_bps:number; cashier_may_override:boolean; items:PricingQuoteLine[] };
 
 export type PaymentPart = { method: "cash"|"card"; amount: number };
 export type PartyBalance = { id: string; code?: string; name: string; phone?: string; balance: number };
@@ -127,10 +139,21 @@ export type ReturnableLine = {
   unit_price?: number;
   unit_cost: number;
   line_total: number;
+  gross_line_total?: number;
+  discount_amount?: number;
+  price_list_id?: string;
+  list_unit_price?: number;
+  price_source?: string;
+  price_override?: boolean;
+  override_reason?: string;
+  override_actor_user_id?: string;
+  margin_bps?: number;
+  margin_guard_bps?: number;
+  below_margin_guard?: boolean;
 };
 export type SaleDetail = {
   id: string; customer_id?: string; customer_name?: string; warehouse_id: string;
-  total_amount: number; paid_amount: number; due_amount: number; status: string; created_at: string; items: ReturnableLine[];
+  gross_amount: number; discount_amount: number; total_amount: number; paid_amount: number; due_amount: number; status: string; created_at: string; items: ReturnableLine[];
 };
 export type PurchaseDetail = {
   id: string; supplier_id: string; supplier_name: string; warehouse_id: string;
@@ -322,6 +345,8 @@ export type SaleHistoryItem = {
   id: string;
   customer_id?: string;
   customer_name?: string;
+  gross_amount: number;
+  discount_amount: number;
   total_amount: number;
   paid_amount: number;
   due_amount: number;
@@ -329,6 +354,7 @@ export type SaleHistoryItem = {
   created_at: string;
   line_count: number;
   total_qty: number;
+  below_margin_count: number;
   network_source: boolean;
 };
 

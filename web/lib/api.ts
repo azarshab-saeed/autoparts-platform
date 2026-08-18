@@ -15,7 +15,7 @@ import type {
   SaleItem,
   SettlementResult,
   Supplier,
-  UserSession, NetworkSearchResult, NetworkStoreOffer, StoreNetworkProfile, NetworkReservation, NetworkReservationStatus, ReservationFulfillmentResult, Expense, ExpenseCategory, PartyStatement, ProfitLoss, CashReport, DailyClosing, DashboardSummary, InventoryInsightReport, PagedResult, PurchaseHistoryItem, SaleHistoryItem, NetworkProcurement, ProcurementReceiveResult, VehicleMake, ProductSearchMetadata, ProductSearchTerm, ProductFitmentInput, AuditLogEntry, ProductImportRow, ProductImportResult, EdgePairing, EdgeDevice, BankAccount, BankLedger, StoreCheck, CheckSummary, CheckDirection, CheckAction
+  UserSession, NetworkSearchResult, NetworkStoreOffer, StoreNetworkProfile, NetworkReservation, NetworkReservationStatus, ReservationFulfillmentResult, Expense, ExpenseCategory, PartyStatement, ProfitLoss, CashReport, DailyClosing, DashboardSummary, InventoryInsightReport, PagedResult, PurchaseHistoryItem, SaleHistoryItem, NetworkProcurement, ProcurementReceiveResult, VehicleMake, ProductSearchMetadata, ProductSearchTerm, ProductFitmentInput, AuditLogEntry, ProductImportRow, ProductImportResult, EdgePairing, EdgeDevice, BankAccount, BankLedger, StoreCheck, CheckSummary, CheckDirection, CheckAction, PriceList, PricingSettings, PriceBreak, ProductPricing, PricingQuote
 } from "./types";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
@@ -24,6 +24,24 @@ export const MOCK_MODE = process.env.NEXT_PUBLIC_MOCK_MODE !== "false";
 export class ApiError extends Error {
   status: number;
   constructor(status:number,message:string){super(message);this.status=status;this.name="ApiError";}
+}
+
+let mockPriceLists: PriceList[] = [
+  {id:"mock-retail",code:"retail",name:"خرده / مصرف‌کننده",is_default:true,active:true},
+  {id:"mock-mechanic",code:"mechanic",name:"مکانیک",is_default:false,active:true},
+  {id:"mock-wholesale",code:"wholesale",name:"عمده",is_default:false,active:true},
+];
+let mockPricingSettings:PricingSettings={min_margin_bps:1000,cashier_may_override:true};
+if(mockCustomers[0]){mockCustomers[0].price_list_id="mock-mechanic";mockCustomers[0].price_list_name="مکانیک";}
+if(mockCustomers[1]){mockCustomers[1].price_list_id="mock-wholesale";mockCustomers[1].price_list_name="عمده";}
+const mockPriceBreaks:Record<string,Record<string,PriceBreak[]>>={};
+for(const list of mockPriceLists){
+  mockPriceBreaks[list.id]={};
+  for(const p of mockProducts){
+    const base=p.mockPrice||0;
+    const multiplier=list.code==="mechanic"?.96:list.code==="wholesale"?.92:1;
+    mockPriceBreaks[list.id][p.id]=[{min_qty:1,unit_price:Math.round(base*multiplier)}];
+  }
 }
 
 async function request<T>(path: string, init: RequestInit = {}, token?: string): Promise<T> {
@@ -73,6 +91,41 @@ export async function searchCustomers(q: string, session: UserSession): Promise<
   return out.items;
 }
 
+export async function getPriceLists(session:UserSession):Promise<PriceList[]>{
+  if(MOCK_MODE)return mockPriceLists.map(x=>({...x}));
+  const out=await request<{items:PriceList[]}>("/v1/pricing/price-lists",{},session.token);return out.items;
+}
+export async function createPriceList(session:UserSession,input:{code:string;name:string;is_default?:boolean}):Promise<PriceList>{
+  if(MOCK_MODE){const row:PriceList={id:crypto.randomUUID(),code:input.code.trim().toLowerCase(),name:input.name.trim(),is_default:Boolean(input.is_default),active:true};if(row.is_default)mockPriceLists=mockPriceLists.map(x=>({...x,is_default:false}));mockPriceLists.push(row);mockPriceBreaks[row.id]={};return{...row};}
+  return request<PriceList>("/v1/pricing/price-lists",{method:"POST",body:JSON.stringify(input)},session.token);
+}
+export async function updatePriceList(session:UserSession,id:string,input:{name:string;is_default:boolean;active:boolean}):Promise<PriceList>{
+  if(MOCK_MODE){const i=mockPriceLists.findIndex(x=>x.id===id);if(i<0)throw new Error("لیست قیمت پیدا نشد");if(input.is_default)mockPriceLists=mockPriceLists.map(x=>({...x,is_default:false}));mockPriceLists[i]={...mockPriceLists[i],...input};return{...mockPriceLists[i]};}
+  return request<PriceList>(`/v1/pricing/price-lists/${id}`,{method:"PUT",body:JSON.stringify(input)},session.token);
+}
+export async function getPricingSettings(session:UserSession):Promise<PricingSettings>{
+  if(MOCK_MODE)return{...mockPricingSettings};return request<PricingSettings>("/v1/pricing/settings",{},session.token);
+}
+export async function savePricingSettings(session:UserSession,input:PricingSettings):Promise<PricingSettings>{
+  if(MOCK_MODE){mockPricingSettings={...input};return{...mockPricingSettings};}return request<PricingSettings>("/v1/pricing/settings",{method:"PUT",body:JSON.stringify(input)},session.token);
+}
+export async function getProductPricing(session:UserSession,priceListId:string,q=""):Promise<ProductPricing[]>{
+  if(MOCK_MODE){const needle=q.trim().toLowerCase();return mockProducts.filter(p=>!needle||[p.title,p.sku,p.brand,p.oem_code].filter(Boolean).some(v=>String(v).toLowerCase().includes(needle))).slice(0,30).map(p=>({product_id:p.id,title:p.title,sku:p.sku,brand:p.brand,breaks:(mockPriceBreaks[priceListId]?.[p.id]||[]).map(x=>({...x}))}));}
+  const out=await request<{items:ProductPricing[]}>(`/v1/pricing/products?price_list_id=${encodeURIComponent(priceListId)}&q=${encodeURIComponent(q)}&limit=30`,{},session.token);return out.items;
+}
+export async function replaceProductPriceBreaks(session:UserSession,priceListId:string,productId:string,breaks:PriceBreak[]):Promise<PriceBreak[]>{
+  if(MOCK_MODE){mockPriceBreaks[priceListId]??={};mockPriceBreaks[priceListId][productId]=breaks.map(x=>({...x})).sort((a,b)=>a.min_qty-b.min_qty);return mockPriceBreaks[priceListId][productId].map(x=>({...x}));}
+  const out=await request<{breaks:PriceBreak[]}>(`/v1/pricing/products/${productId}/breaks`,{method:"PUT",body:JSON.stringify({price_list_id:priceListId,breaks})},session.token);return out.breaks;
+}
+export async function assignCustomerPriceList(session:UserSession,customerId:string,priceListId:string|null):Promise<Customer>{
+  if(MOCK_MODE){const c=mockCustomers.find(x=>x.id===customerId);if(!c)throw new Error("مشتری پیدا نشد");const pl=mockPriceLists.find(x=>x.id===priceListId);c.price_list_id=pl?.id;c.price_list_name=pl?.name;return{...c};}
+  return request<Customer>(`/v1/customers/${customerId}/price-list`,{method:"PUT",body:JSON.stringify({price_list_id:priceListId})},session.token);
+}
+export async function quotePricing(session:UserSession,items:{product_id:string;qty:number}[],customerId?:string|null):Promise<PricingQuote>{
+  if(MOCK_MODE){const customer=customerId?mockCustomers.find(x=>x.id===customerId):undefined;const selected=mockPriceLists.find(x=>x.id===customer?.price_list_id&&x.active)||mockPriceLists.find(x=>x.is_default&&x.active)||mockPriceLists[0];const fallback=mockPriceLists.find(x=>x.is_default&&x.active)||selected;const rows=items.map(i=>{const p=mockProducts.find(x=>x.id===i.product_id);const selectedBreaks=mockPriceBreaks[selected.id]?.[i.product_id]||[];const selectedEligible=selectedBreaks.filter(b=>b.min_qty<=i.qty).sort((a,b)=>b.min_qty-a.min_qty)[0];const fallbackBreaks=selected.id===fallback.id?[]:(mockPriceBreaks[fallback.id]?.[i.product_id]||[]);const fallbackEligible=fallbackBreaks.filter(b=>b.min_qty<=i.qty).sort((a,b)=>b.min_qty-a.min_qty)[0];const price=selectedEligible?.unit_price??fallbackEligible?.unit_price??p?.mockPrice??0;const source=selectedEligible?"price_list":fallbackEligible?"default_fallback":"network_offer_fallback";const applied=selectedEligible?selected:fallbackEligible?fallback:undefined;const cost=p?.mockUnitCost||Math.round(price*.75);const min=Math.ceil(cost*10000/(10000-mockPricingSettings.min_margin_bps));return{product_id:i.product_id,qty:i.qty,price_list_id:applied?.id,price_list_name:applied?.name,unit_price:price,price_source:source,min_allowed_price:min};});return{price_list_id:selected.id,price_list_name:selected.name,min_margin_bps:mockPricingSettings.min_margin_bps,cashier_may_override:mockPricingSettings.cashier_may_override,items:rows};}
+  return request<PricingQuote>("/v1/pricing/quote",{method:"POST",body:JSON.stringify({warehouse_id:session.warehouseId,customer_id:customerId||null,items})},session.token);
+}
+
 export async function searchSuppliers(q: string, session: UserSession): Promise<Supplier[]> {
   if (MOCK_MODE) {
     const s = q.trim();
@@ -100,7 +153,7 @@ export async function postSale(session: UserSession, items: SaleItem[], customer
       customer_id: customerId,
       payment_method: paymentMethod,
       ...(payments ? { payments } : {}),
-      items: items.map(i => ({ product_id: i.product.id, qty: i.qty, unit_price: i.unitPrice }))
+      items: items.map(i => ({ product_id: i.product.id, qty: i.qty, unit_price: i.unitPrice, ...(i.overrideReason ? { override_reason: i.overrideReason } : {}) }))
     })
   }, session.token);
 }

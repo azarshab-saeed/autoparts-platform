@@ -34,11 +34,23 @@ func (c *Cloud) Snapshot(ctx context.Context, cfg Config) (Snapshot, error) {
 
 func (c *Cloud) PushSale(ctx context.Context, cfg Config, sale LocalSale) (CloudSaleResponse, int, error) {
 	var out CloudSaleResponse
+	items := make([]map[string]any, 0, len(sale.Items))
+	for _, item := range sale.Items {
+		items = append(items, map[string]any{
+			"product_id": item.ProductID,
+			"title":      item.Title,
+			"qty":        item.Qty,
+			"unit_price": item.UnitPrice,
+		})
+	}
 	body := map[string]any{
 		"local_operation_id": sale.LocalOperationID,
 		"occurred_at":        sale.CreatedAt,
 		"payment_method":     sale.PaymentMethod,
-		"items":              sale.Items,
+		"items":              items,
+	}
+	if sale.CustomerID != "" {
+		body["customer_id"] = sale.CustomerID
 	}
 	status, err := c.doStatus(ctx, cfg.CloudURL+"/v1/edge/sales", "POST", cfg.DeviceID, cfg.DeviceSecret, body, &out)
 	return out, status, err

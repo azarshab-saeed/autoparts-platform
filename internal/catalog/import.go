@@ -111,6 +111,16 @@ func (s *Service) Import(ctx context.Context, cmd ImportCommand) (ImportResult, 
 	if !warehouseOK {
 		return ImportResult{}, errors.New("destination warehouse does not belong to authenticated store")
 	}
+	if _, err = tx.Exec(ctx, `INSERT INTO price_lists(tenant_id,store_id,code,name,is_default,active) SELECT $1,$2,'retail','خرده / مصرف‌کننده',true,true WHERE NOT EXISTS (SELECT 1 FROM price_lists WHERE tenant_id=$1 AND store_id=$2 AND is_default AND active)`, cmd.TenantID, cmd.StoreID); err != nil {
+		return ImportResult{}, err
+	}
+	if _, err = tx.Exec(ctx, `INSERT INTO store_pricing_settings(tenant_id,store_id) VALUES($1,$2) ON CONFLICT DO NOTHING`, cmd.TenantID, cmd.StoreID); err != nil {
+		return ImportResult{}, err
+	}
+	var defaultPriceListID uuid.UUID
+	if err = tx.QueryRow(ctx, `SELECT id FROM price_lists WHERE tenant_id=$1 AND store_id=$2 AND is_default AND active ORDER BY created_at LIMIT 1`, cmd.TenantID, cmd.StoreID).Scan(&defaultPriceListID); err != nil {
+		return ImportResult{}, err
+	}
 
 	out := ImportResult{BatchID: uuid.New(), RowCount: len(rows), Rows: make([]ImportRowResult, 0, len(rows))}
 
@@ -167,6 +177,13 @@ func (s *Service) Import(ctx context.Context, cmd ImportCommand) (ImportResult, 
 				              last_verified_at=now(),updated_at=now()`,
 				cmd.TenantID, cmd.StoreID, cmd.WarehouseID, productID, row.SellingPrice, row.Visible, row.AllowReservation, row.AllowProcurement)
 			if err != nil {
+				return ImportResult{}, err
+			}
+			if _, err = tx.Exec(ctx, `
+				INSERT INTO product_price_breaks(tenant_id,store_id,product_id,price_list_id,min_qty,unit_price)
+				VALUES($1,$2,$3,$4,1,$5)
+				ON CONFLICT(tenant_id,store_id,product_id,price_list_id,min_qty)
+				DO UPDATE SET unit_price=EXCLUDED.unit_price,updated_at=now()`, cmd.TenantID, cmd.StoreID, productID, defaultPriceListID, row.SellingPrice); err != nil {
 				return ImportResult{}, err
 			}
 			offerAction = "upserted"

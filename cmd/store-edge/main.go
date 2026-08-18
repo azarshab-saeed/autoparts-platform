@@ -112,10 +112,12 @@ func runAgent(ctx context.Context, serviceMode bool) error {
 				conflicts++
 			}
 		}
+		manualAllowed := st.Snapshot.PricingPolicy == nil || st.Snapshot.PricingPolicy.CashierMayOverride
 		writeJSON(w, http.StatusOK, map[string]any{
 			"paired": store.IsPaired(), "store_name": cfg.StoreName, "device_name": cfg.DeviceName,
 			"pending_sales": pending, "conflicts": conflicts, "last_sync_at": st.LastSyncAt,
 			"last_sync_error": st.LastSyncError, "catalog_items": len(st.Snapshot.Products), "snapshot_at": st.Snapshot.GeneratedAt,
+			"cashier_may_override": manualAllowed,
 		})
 	})
 	mux.HandleFunc("POST /v1/pair", func(w http.ResponseWriter, r *http.Request) {
@@ -158,13 +160,14 @@ func runAgent(ctx context.Context, serviceMode bool) error {
 	mux.HandleFunc("POST /v1/offline-sales", func(w http.ResponseWriter, r *http.Request) {
 		var in struct {
 			PaymentMethod string                    `json:"payment_method"`
+			CustomerID    string                    `json:"customer_id,omitempty"`
 			Items         []storeedge.LocalSaleItem `json:"items"`
 		}
 		if err := decodeJSON(r, &in); err != nil {
 			writeError(w, http.StatusBadRequest, err)
 			return
 		}
-		out, err := store.QueueSale(in.PaymentMethod, in.Items)
+		out, err := store.QueueSale(in.PaymentMethod, in.CustomerID, in.Items)
 		if err != nil {
 			writeError(w, http.StatusConflict, err)
 			return

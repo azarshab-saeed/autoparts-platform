@@ -12,9 +12,9 @@ The goal is not merely to reproduce Holoo accounting screens. The goal is to rem
 
 ## Current checkpoint
 
-- **Latest completed product checkpoint:** Phase 15.10 — Checks Pagination & Acceptance Hardening
-- **Next product phase:** **Phase 15.11 — Advanced Pricing & Trade Terms**
-- Phase 15.11 should remain the next phase unless a verified blocker makes it impossible to implement safely.
+- **Latest completed product checkpoint:** Phase 15.11 — Advanced Pricing & Trade Terms
+- **Next product phase:** **Phase 15.12 — Multi-Unit & Packaging**
+- Phase 15.12 should remain the next phase unless a verified blocker makes it impossible to implement safely.
 - Build/dependency/release hardening tasks are important, but they do **not** replace this product roadmap. They should be handled as blocking fixes, maintenance slices, or release gates unless they materially change product capability.
 
 ---
@@ -41,7 +41,7 @@ We should not spend the roadmap trying to win only by copying a mature accountin
 
 ---
 
-## Competitive status after Phase 15.10
+## Competitive status after Phase 15.11
 
 | Area | Current status | Strategic position |
 |---|---|---|
@@ -66,8 +66,8 @@ We should not spend the roadmap trying to win only by copying a mature accountin
 | Check spend/endorsement | Implemented | Major Holoo gap substantially closed |
 | Bank accounts / due / bounced / cleared checks | Implemented | Major Holoo gap substantially closed |
 | Checks UX and pagination | Implemented through 15.10 | Ready for larger real datasets |
-| Advanced multi-price rules | **Missing** | High-priority migration blocker |
-| Wholesale/retail/mechanic pricing | **Missing** | High-priority migration blocker |
+| Advanced multi-price rules | **Implemented in 15.11** | Migration blocker closed |
+| Wholesale/retail/mechanic pricing | **Implemented in 15.11** | Customer + quantity aware pricing |
 | Multi-unit / pack / carton handling | **Missing** | High-priority auto-parts requirement |
 | Check maturity averaging (راس‌گیری) | **Missing** | Important professional finance gap |
 | Bank reconciliation | **Missing** | Important finance gap |
@@ -82,7 +82,7 @@ We should not spend the roadmap trying to win only by copying a mature accountin
 
 ## Phase 15.11 — Advanced Pricing & Trade Terms
 
-**Status:** NEXT
+**Status:** DONE
 
 ### Objective
 
@@ -177,11 +177,26 @@ This separation is strategically important because our network business model is
 - Network prices cannot accidentally leak a private local wholesale tier.
 - Discount/margin effects are reflected correctly in accounting and reports.
 
+### Delivered in Phase 15.11
+
+- tenant/store-scoped configurable price lists with a canonical default retail list;
+- customer default price-list assignment;
+- deterministic quantity-break resolution with default-list fallback;
+- POS automatic repricing by customer and quantity;
+- line and invoice discount UX using persisted final unit prices;
+- immutable gross, discount and net sale facts for history/reporting;
+- minimum-margin policy with server-side enforcement, mandatory reason and actor audit for Owner/Admin exceptions;
+- persisted list price, final price, source, override reason, override actor and historical margin-guard decision;
+- local price lists remain separate from `store_product_offers`, so private wholesale/mechanic tiers are not published to the parts network;
+- imported selling price seeds the local default retail tier without coupling later local-tier edits to network offers;
+- Store Edge receives default-retail quantity breaks and cashier override policy, so offline quantity changes keep the same pricing behavior and manual overrides cannot bypass store policy.
+- Main web POS preserves an already-resolved mechanic/wholesale/customer-tier price plus `customer_id` through the offline queue; Cloud revalidates it against current server pricing on sync.
+
 ---
 
 ## Phase 15.12 — Multi-Unit & Packaging
 
-**Status:** PLANNED
+**Status:** NEXT
 
 ### Objective
 
@@ -422,8 +437,8 @@ Unless this document is intentionally revised, continue in this order:
 ```text
 15.9.1  Checks UX Hotfix                         DONE
 15.10   Checks Pagination & Acceptance           DONE
-15.11   Advanced Pricing & Trade Terms            NEXT
-15.12   Multi-Unit & Packaging                    PLANNED
+15.11   Advanced Pricing & Trade Terms            DONE
+15.12   Multi-Unit & Packaging                    NEXT
 15.13   Bank Reconciliation & Check Intelligence  PLANNED
 15.14   Tax, VAT & Official Invoicing Foundation  PLANNED
 15.15   Iranian Modian Integration                PLANNED

@@ -123,7 +123,19 @@ func (s *Store) SearchCatalog(q string, limit int) []Product {
 	return out
 }
 
-func (s *Store) QueueSale(paymentMethod string, items []LocalSaleItem) (LocalSale, error) {
+func priceForQuantity(p Product, qty float64) int64 {
+	price := p.SellingPrice
+	bestMin := float64(-1)
+	for _, b := range p.PriceBreaks {
+		if b.MinQty <= qty && b.MinQty >= 0 && b.MinQty > bestMin {
+			price = b.UnitPrice
+			bestMin = b.MinQty
+		}
+	}
+	return price
+}
+
+func (s *Store) QueueSale(paymentMethod, customerID string, items []LocalSaleItem) (LocalSale, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.config.DeviceID == "" {
@@ -148,6 +160,13 @@ func (s *Store) QueueSale(paymentMethod string, items []LocalSaleItem) (LocalSal
 		if items[i].Qty <= 0 || items[i].UnitPrice < 0 || s.state.Snapshot.Products[idx].Available+1e-9 < items[i].Qty {
 			return LocalSale{}, fmt.Errorf("insufficient local stock for %s", s.state.Snapshot.Products[idx].Title)
 		}
+		manualAllowed := s.state.Snapshot.PricingPolicy == nil || s.state.Snapshot.PricingPolicy.CashierMayOverride
+		if items[i].ManualPrice && !manualAllowed {
+			return LocalSale{}, errors.New("cashier price override is disabled")
+		}
+		if !items[i].ManualPrice && !items[i].PreservePrice {
+			items[i].UnitPrice = priceForQuantity(s.state.Snapshot.Products[idx], items[i].Qty)
+		}
 		items[i].Title = s.state.Snapshot.Products[idx].Title
 		line := int64(math.Round(items[i].Qty * float64(items[i].UnitPrice)))
 		if line < 0 || total > math.MaxInt64-line {
@@ -171,6 +190,7 @@ func (s *Store) QueueSale(paymentMethod string, items []LocalSaleItem) (LocalSal
 		LocalNumber:      fmt.Sprintf("LOCAL-%s-%06d", now.Format("20060102"), s.state.Sequence),
 		CreatedAt:        now,
 		PaymentMethod:    paymentMethod,
+		CustomerID:       strings.TrimSpace(customerID),
 		Items:            items,
 		TotalAmount:      total,
 		Status:           "pending",

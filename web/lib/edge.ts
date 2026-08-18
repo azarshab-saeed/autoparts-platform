@@ -12,6 +12,7 @@ export type StoreEdgeStatus = {
   last_sync_error?: string;
   catalog_items: number;
   snapshot_at?: string;
+  cashier_may_override?: boolean;
 };
 
 export type StoreEdgeLocalSale = {
@@ -43,10 +44,10 @@ export async function getStoreEdgeStatus():Promise<StoreEdgeStatus>{
   return localRequest<StoreEdgeStatus>("/v1/status",{},900);
 }
 
-export async function queueOfflineSale(items:SaleItem[],paymentMethod:"cash"|"card"):Promise<StoreEdgeLocalSale>{
+export async function queueOfflineSale(items:SaleItem[],paymentMethod:"cash"|"card",customerId?:string|null):Promise<StoreEdgeLocalSale>{
   return localRequest<StoreEdgeLocalSale>("/v1/offline-sales",{
     method:"POST",
-    body:JSON.stringify({payment_method:paymentMethod,items:items.map(x=>({product_id:x.product.id,title:x.product.title,qty:x.qty,unit_price:x.unitPrice}))})
+    body:JSON.stringify({payment_method:paymentMethod,customer_id:customerId||undefined,items:items.map(x=>({product_id:x.product.id,title:x.product.title,qty:x.qty,unit_price:x.unitPrice,manual_price:Boolean(x.manualPrice),preserve_price:true}))})
   },2500);
 }
 

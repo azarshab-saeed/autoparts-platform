@@ -105,6 +105,12 @@ func (s *Service) Bootstrap(ctx context.Context, req BootstrapRequest) (Bootstra
 	if err = tx.QueryRow(ctx, `INSERT INTO stores(tenant_id,name,code) VALUES($1,$2,NULLIF($3,'')) RETURNING id`, out.TenantID, strings.TrimSpace(req.StoreName), strings.TrimSpace(req.StoreCode)).Scan(&out.StoreID); err != nil {
 		return out, err
 	}
+	if _, err = tx.Exec(ctx, `INSERT INTO price_lists(tenant_id,store_id,code,name,is_default,active) VALUES($1,$2,'retail','خرده / مصرف‌کننده',true,true)`, out.TenantID, out.StoreID); err != nil {
+		return out, err
+	}
+	if _, err = tx.Exec(ctx, `INSERT INTO store_pricing_settings(tenant_id,store_id) VALUES($1,$2)`, out.TenantID, out.StoreID); err != nil {
+		return out, err
+	}
 	if err = tx.QueryRow(ctx, `INSERT INTO users(email,display_name,password_hash) VALUES(lower($1),$2,$3) RETURNING id`, strings.TrimSpace(req.Email), strings.TrimSpace(req.AdminName), hash).Scan(&out.UserID); err != nil {
 		return out, err
 	}

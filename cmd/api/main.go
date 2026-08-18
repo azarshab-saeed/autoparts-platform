@@ -28,6 +28,7 @@ import (
 	"github.com/example/autoparts-core/internal/platform/db"
 	"github.com/example/autoparts-core/internal/platform/httpx"
 	"github.com/example/autoparts-core/internal/platform/pagination"
+	"github.com/example/autoparts-core/internal/pricing"
 	"github.com/example/autoparts-core/internal/procurement"
 	"github.com/example/autoparts-core/internal/purchases"
 	"github.com/example/autoparts-core/internal/reservations"
@@ -44,7 +45,7 @@ var (
 	buildTime = "unknown"
 )
 
-const latestMigration = "015_checks_banking.sql"
+const latestMigration = "016_advanced_pricing.sql"
 
 func main() {
 	log.SetFlags(0)
@@ -69,6 +70,7 @@ func main() {
 	storeSvc := stores.NewService(pool)
 	salesSvc := sales.NewService(pool)
 	purchaseSvc := purchases.NewService(pool)
+	pricingSvc := pricing.NewService(pool)
 	procurementSvc := procurement.NewService(pool)
 	inventorySvc := inventory.NewService(pool)
 	networkSvc := network.NewService(pool)
@@ -238,6 +240,151 @@ func main() {
 			return
 		}
 		api.WriteJSON(w, http.StatusCreated, out)
+	})))
+
+	protected.Handle("GET /v1/pricing/price-lists", auth.RequireRoles("owner", "admin")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, _ := auth.ClaimsFrom(r.Context())
+		out, err := pricingSvc.ListPriceLists(r.Context(), c.TenantID, c.StoreID)
+		if err != nil {
+			api.WriteError(w, api.Conflict("price_lists_failed", err.Error()))
+			return
+		}
+		api.WriteJSON(w, http.StatusOK, map[string]any{"items": out})
+	})))
+	protected.Handle("POST /v1/pricing/price-lists", auth.RequireRoles("owner", "admin")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, _ := auth.ClaimsFrom(r.Context())
+		var in pricing.CreatePriceList
+		if err := decodeJSON(r, &in); err != nil {
+			api.WriteError(w, err)
+			return
+		}
+		out, err := pricingSvc.CreatePriceList(r.Context(), c.TenantID, c.StoreID, in)
+		if err != nil {
+			api.WriteError(w, api.Conflict("price_list_create_failed", err.Error()))
+			return
+		}
+		api.WriteJSON(w, http.StatusCreated, out)
+	})))
+	protected.Handle("PUT /v1/pricing/price-lists/{id}", auth.RequireRoles("owner", "admin")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, _ := auth.ClaimsFrom(r.Context())
+		id, err := uuid.Parse(r.PathValue("id"))
+		if err != nil {
+			api.WriteError(w, api.BadRequest("invalid_price_list_id", "price list id must be a UUID"))
+			return
+		}
+		var in pricing.UpdatePriceList
+		if err := decodeJSON(r, &in); err != nil {
+			api.WriteError(w, err)
+			return
+		}
+		out, err := pricingSvc.UpdatePriceList(r.Context(), c.TenantID, c.StoreID, id, in)
+		if err != nil {
+			api.WriteError(w, api.Conflict("price_list_update_failed", err.Error()))
+			return
+		}
+		api.WriteJSON(w, http.StatusOK, out)
+	})))
+	protected.Handle("GET /v1/pricing/settings", auth.RequireRoles("owner", "admin")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, _ := auth.ClaimsFrom(r.Context())
+		out, err := pricingSvc.GetSettings(r.Context(), c.TenantID, c.StoreID)
+		if err != nil {
+			api.WriteError(w, api.Conflict("pricing_settings_failed", err.Error()))
+			return
+		}
+		api.WriteJSON(w, http.StatusOK, out)
+	})))
+	protected.Handle("PUT /v1/pricing/settings", auth.RequireRoles("owner", "admin")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, _ := auth.ClaimsFrom(r.Context())
+		var in pricing.Settings
+		if err := decodeJSON(r, &in); err != nil {
+			api.WriteError(w, err)
+			return
+		}
+		out, err := pricingSvc.UpdateSettings(r.Context(), c.TenantID, c.StoreID, in)
+		if err != nil {
+			api.WriteError(w, api.Conflict("pricing_settings_update_failed", err.Error()))
+			return
+		}
+		api.WriteJSON(w, http.StatusOK, out)
+	})))
+	protected.Handle("GET /v1/pricing/products", auth.RequireRoles("owner", "admin")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, _ := auth.ClaimsFrom(r.Context())
+		priceListID, err := uuid.Parse(strings.TrimSpace(r.URL.Query().Get("price_list_id")))
+		if err != nil {
+			api.WriteError(w, api.BadRequest("invalid_price_list_id", "price_list_id must be a UUID"))
+			return
+		}
+		limit, err := strconv.Atoi(r.URL.Query().Get("limit"))
+		if err != nil || limit <= 0 {
+			limit = 30
+		}
+		out, err := pricingSvc.ListProductPricing(r.Context(), c.TenantID, c.StoreID, priceListID, r.URL.Query().Get("q"), limit)
+		if err != nil {
+			api.WriteError(w, api.Conflict("pricing_products_failed", err.Error()))
+			return
+		}
+		api.WriteJSON(w, http.StatusOK, map[string]any{"items": out})
+	})))
+	protected.Handle("PUT /v1/pricing/products/{product_id}/breaks", auth.RequireRoles("owner", "admin")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, _ := auth.ClaimsFrom(r.Context())
+		productID, err := uuid.Parse(r.PathValue("product_id"))
+		if err != nil {
+			api.WriteError(w, api.BadRequest("invalid_product_id", "product id must be a UUID"))
+			return
+		}
+		var in struct {
+			PriceListID uuid.UUID       `json:"price_list_id"`
+			Breaks      []pricing.Break `json:"breaks"`
+		}
+		if err := decodeJSON(r, &in); err != nil {
+			api.WriteError(w, err)
+			return
+		}
+		out, err := pricingSvc.ReplaceProductBreaks(r.Context(), c.TenantID, c.StoreID, productID, in.PriceListID, in.Breaks)
+		if err != nil {
+			api.WriteError(w, api.Conflict("product_pricing_update_failed", err.Error()))
+			return
+		}
+		api.WriteJSON(w, http.StatusOK, map[string]any{"breaks": out})
+	})))
+	protected.Handle("POST /v1/pricing/quote", auth.RequireRoles("owner", "admin", "cashier")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, _ := auth.ClaimsFrom(r.Context())
+		var in struct {
+			WarehouseID uuid.UUID                  `json:"warehouse_id"`
+			CustomerID  *uuid.UUID                 `json:"customer_id,omitempty"`
+			Items       []pricing.QuoteRequestLine `json:"items"`
+		}
+		if err := decodeJSON(r, &in); err != nil {
+			api.WriteError(w, err)
+			return
+		}
+		out, err := pricingSvc.Quote(r.Context(), c.TenantID, c.StoreID, in.WarehouseID, in.CustomerID, in.Items)
+		if err != nil {
+			api.WriteError(w, api.Conflict("pricing_quote_failed", err.Error()))
+			return
+		}
+		api.WriteJSON(w, http.StatusOK, out)
+	})))
+	protected.Handle("PUT /v1/customers/{id}/price-list", auth.RequireRoles("owner", "admin")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, _ := auth.ClaimsFrom(r.Context())
+		customerID, err := uuid.Parse(r.PathValue("id"))
+		if err != nil {
+			api.WriteError(w, api.BadRequest("invalid_customer_id", "customer id must be a UUID"))
+			return
+		}
+		var in struct {
+			PriceListID *uuid.UUID `json:"price_list_id"`
+		}
+		if err := decodeJSON(r, &in); err != nil {
+			api.WriteError(w, err)
+			return
+		}
+		out, err := customerSvc.AssignPriceList(r.Context(), c.TenantID, c.StoreID, customerID, in.PriceListID)
+		if err != nil {
+			api.WriteError(w, api.Conflict("customer_price_list_update_failed", err.Error()))
+			return
+		}
+		api.WriteJSON(w, http.StatusOK, out)
 	})))
 
 	protected.HandleFunc("GET /v1/suppliers", func(w http.ResponseWriter, r *http.Request) {
@@ -1157,6 +1304,8 @@ func main() {
 		}
 		cmd.TenantID = c.TenantID
 		cmd.StoreID = c.StoreID
+		cmd.ActorUserID = c.UserID
+		cmd.ActorRole = c.Role
 		cmd.IdempotencyKey = r.Header.Get("Idempotency-Key")
 		if cmd.IdempotencyKey == "" {
 			api.WriteError(w, api.BadRequest("missing_idempotency_key", "Idempotency-Key header is required"))
@@ -1281,9 +1430,10 @@ func main() {
 			return
 		}
 		var in struct {
-			LocalOperationID string    `json:"local_operation_id"`
-			OccurredAt       time.Time `json:"occurred_at"`
-			PaymentMethod    string    `json:"payment_method"`
+			LocalOperationID string     `json:"local_operation_id"`
+			OccurredAt       time.Time  `json:"occurred_at"`
+			PaymentMethod    string     `json:"payment_method"`
+			CustomerID       *uuid.UUID `json:"customer_id,omitempty"`
 			Items            []struct {
 				ProductID uuid.UUID `json:"product_id"`
 				Qty       float64   `json:"qty"`
@@ -1306,14 +1456,14 @@ func main() {
 		}
 		items := make([]sales.CreateSaleItem, 0, len(in.Items))
 		for _, x := range in.Items {
-			items = append(items, sales.CreateSaleItem{ProductID: x.ProductID, Qty: x.Qty, UnitPrice: x.UnitPrice})
+			items = append(items, sales.CreateSaleItem{ProductID: x.ProductID, Qty: x.Qty, UnitPrice: x.UnitPrice, OverrideReason: "offline_snapshot_price"})
 		}
 		deviceID := d.ID
 		occurred := in.OccurredAt
 		if occurred.IsZero() {
 			occurred = time.Now()
 		}
-		cmd := sales.CreateSaleCommand{TenantID: d.TenantID, StoreID: d.StoreID, WarehouseID: d.WarehouseID, PaymentMethod: in.PaymentMethod, IdempotencyKey: "edge:" + d.ID.String() + ":" + localID, Source: "edge", EdgeDeviceID: &deviceID, EdgeLocalOperationID: localID, EdgeOccurredAt: &occurred, Items: items}
+		cmd := sales.CreateSaleCommand{TenantID: d.TenantID, StoreID: d.StoreID, ActorRole: "edge", WarehouseID: d.WarehouseID, CustomerID: in.CustomerID, PaymentMethod: in.PaymentMethod, IdempotencyKey: "edge:" + d.ID.String() + ":" + localID, Source: "edge", EdgeDeviceID: &deviceID, EdgeLocalOperationID: localID, EdgeOccurredAt: &occurred, Items: items}
 		out, err := salesSvc.Create(r.Context(), cmd)
 		if err != nil {
 			_ = edgeSvc.RecordSync(r.Context(), d, localID, nil, "conflict", err.Error())
