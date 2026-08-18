@@ -98,6 +98,25 @@ export type InventoryAdjustmentResult = {
 export type PaymentPart = { method: "cash"|"card"; amount: number };
 export type PartyBalance = { id: string; code?: string; name: string; phone?: string; balance: number };
 export type SettlementResult = { id: string; party_type: "customer"|"supplier"; method: "cash"|"card"; amount: number; balance: number; status: string };
+
+export type BankAccount = {
+  id: string; name: string; bank_name: string; account_number?: string; card_number?: string; iban?: string;
+  opening_balance: number; balance: number; active: boolean; is_default: boolean; created_at: string;
+};
+export type BankLedgerLine = {
+  id: string; journal_id: string; reference_type: string; reference_id: string; debit: number; credit: number; change: number; balance: number; posted_at: string;
+};
+export type BankLedger = { account: BankAccount; items: BankLedgerLine[] };
+export type CheckDirection = "receivable"|"payable";
+export type CheckStatus = "held"|"deposited"|"cleared"|"bounced"|"endorsed"|"returned"|"cancelled"|"issued";
+export type StoreCheck = {
+  id: string; direction: CheckDirection; customer_id?: string; customer_name?: string; supplier_id?: string; supplier_name?: string;
+  check_number: string; sayad_id?: string; bank_name?: string; branch_name?: string; amount: number; issue_date: string; due_date: string;
+  status: CheckStatus; bank_account_id?: string; bank_account_name?: string; endorsed_supplier_id?: string; endorsed_supplier_name?: string;
+  note?: string; created_at: string; updated_at: string;
+};
+export type CheckSummary = { receivable_open_amount: number; payable_open_amount: number; due_today_count: number; due_next_7_count: number; overdue_count: number; bounced_count: number };
+export type CheckAction = "deposit"|"clear"|"bounce"|"endorse"|"return_endorsement"|"return"|"cancel";
 export type ReturnableLine = {
   id: string;
   product_id: string;

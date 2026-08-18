@@ -29,6 +29,7 @@ const nav: NavItem[] = [
   {href:"/store/orders",label:"سفارش‌های شبکه",icon:CartIcon,group:"شبکه",mobile:true},
   {href:"/store/fitment",label:"کاتالوگ و فیتمنت",icon:SearchIcon,group:"شبکه"},
   {href:"/store/accounts",label:"حساب‌ها",icon:UsersIcon,group:"مالی و کنترل"},
+  {href:"/store/checks",label:"چک و بانک",icon:ChartIcon,group:"مالی و کنترل",roles:["owner","admin","cashier","accountant"]},
   {href:"/store/expenses",label:"هزینه‌ها",icon:ChartIcon,group:"مالی و کنترل",roles:["owner","admin","accountant"]},
   {href:"/store/closing",label:"صندوق و بستن روز",icon:ChartIcon,group:"مالی و کنترل",roles:["owner","admin","cashier","accountant"]},
   {href:"/store/returns",label:"مرجوعی",icon:CartIcon,group:"مالی و کنترل"},

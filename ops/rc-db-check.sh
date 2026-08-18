@@ -95,4 +95,16 @@ assert_zero "edge sale provenance" \
 assert_zero "edge sync event reconciliation" \
   "SELECT count(*) FROM store_edge_sync_events e WHERE e.status='synced' AND (e.server_reference_id IS NULL OR NOT EXISTS (SELECT 1 FROM sales s WHERE s.id=e.server_reference_id AND s.tenant_id=e.tenant_id AND s.store_id=e.store_id AND s.source='edge' AND s.edge_device_id=e.device_id AND s.edge_local_operation_id=e.local_operation_id));"
 
+assert_zero "check party store consistency" \
+  "SELECT count(*) FROM checks c LEFT JOIN customers cu ON cu.id=c.customer_id LEFT JOIN suppliers sp ON sp.id=c.supplier_id WHERE (c.direction='receivable' AND (cu.id IS NULL OR cu.tenant_id<>c.tenant_id OR cu.store_id<>c.store_id)) OR (c.direction='payable' AND (sp.id IS NULL OR sp.tenant_id<>c.tenant_id OR sp.store_id<>c.store_id));"
+
+assert_zero "check bank account scope" \
+  "SELECT count(*) FROM checks c JOIN store_bank_accounts b ON b.id=c.bank_account_id WHERE c.tenant_id<>b.tenant_id OR c.store_id<>b.store_id;"
+
+assert_zero "check terminal metadata" \
+  "SELECT count(*) FROM checks WHERE (status IN ('deposited','cleared') AND bank_account_id IS NULL) OR (status='endorsed' AND endorsed_supplier_id IS NULL);"
+
+assert_zero "bank GL tenant consistency" \
+  "SELECT count(*) FROM store_bank_accounts b JOIN accounts a ON a.id=b.account_id WHERE b.tenant_id<>a.tenant_id OR a.type<>'asset';"
+
 printf '%s\n' 'PASS all database invariants'

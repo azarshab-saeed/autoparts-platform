@@ -44,7 +44,7 @@ var (
 	buildTime = "unknown"
 )
 
-const latestMigration = "014_store_edge_offline.sql"
+const latestMigration = "015_checks_banking.sql"
 
 func main() {
 	log.SetFlags(0)
@@ -603,6 +603,139 @@ func main() {
 			return
 		}
 		api.WriteJSON(w, http.StatusCreated, out)
+	})))
+
+	protected.Handle("GET /v1/banking/accounts", auth.RequireRoles("owner", "admin", "cashier", "accountant")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, _ := auth.ClaimsFrom(r.Context())
+		out, err := financeSvc.ListBankAccounts(r.Context(), c.TenantID, c.StoreID)
+		if err != nil {
+			api.WriteError(w, api.Conflict("bank_accounts_failed", err.Error()))
+			return
+		}
+		api.WriteJSON(w, http.StatusOK, map[string]any{"items": out})
+	})))
+	protected.Handle("POST /v1/banking/accounts", auth.RequireRoles("owner", "admin", "accountant")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, _ := auth.ClaimsFrom(r.Context())
+		var cmd finance.BankAccountCommand
+		if err := decodeJSON(r, &cmd); err != nil {
+			api.WriteError(w, err)
+			return
+		}
+		cmd.TenantID, cmd.StoreID = c.TenantID, c.StoreID
+		cmd.IdempotencyKey = strings.TrimSpace(r.Header.Get("Idempotency-Key"))
+		if cmd.IdempotencyKey == "" {
+			api.WriteError(w, api.BadRequest("missing_idempotency_key", "Idempotency-Key header is required"))
+			return
+		}
+		out, err := financeSvc.CreateBankAccount(r.Context(), cmd)
+		if err != nil {
+			api.WriteError(w, api.Conflict("bank_account_rejected", err.Error()))
+			return
+		}
+		api.WriteJSON(w, http.StatusCreated, out)
+	})))
+	protected.Handle("GET /v1/banking/accounts/{id}/ledger", auth.RequireRoles("owner", "admin", "accountant")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, _ := auth.ClaimsFrom(r.Context())
+		id, err := uuid.Parse(r.PathValue("id"))
+		if err != nil {
+			api.WriteError(w, api.BadRequest("invalid_bank_account_id", "bank account id must be a UUID"))
+			return
+		}
+		out, err := financeSvc.BankLedger(r.Context(), c.TenantID, c.StoreID, id)
+		if err != nil {
+			api.WriteError(w, api.NotFound("bank_ledger_not_found", err.Error()))
+			return
+		}
+		api.WriteJSON(w, http.StatusOK, out)
+	})))
+
+	protected.Handle("GET /v1/checks", auth.RequireRoles("owner", "admin", "cashier", "accountant")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, _ := auth.ClaimsFrom(r.Context())
+		limit, offset, err := pageParams(r)
+		if err != nil {
+			api.WriteError(w, err)
+			return
+		}
+		items, total, err := financeSvc.ListChecks(r.Context(), c.TenantID, c.StoreID, r.URL.Query().Get("direction"), r.URL.Query().Get("status"), r.URL.Query().Get("q"), limit, offset)
+		if err != nil {
+			api.WriteError(w, api.BadRequest("checks_query_failed", err.Error()))
+			return
+		}
+		api.WriteJSON(w, http.StatusOK, pagedEnvelope(items, total, limit, offset))
+	})))
+	protected.Handle("GET /v1/checks/summary", auth.RequireRoles("owner", "admin", "cashier", "accountant")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, _ := auth.ClaimsFrom(r.Context())
+		out, err := financeSvc.CheckSummary(r.Context(), c.TenantID, c.StoreID, time.Now())
+		if err != nil {
+			api.WriteError(w, api.Conflict("checks_summary_failed", err.Error()))
+			return
+		}
+		api.WriteJSON(w, http.StatusOK, out)
+	})))
+	protected.Handle("POST /v1/checks/receivable", auth.RequireRoles("owner", "admin", "cashier", "accountant")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, _ := auth.ClaimsFrom(r.Context())
+		var cmd finance.CheckCommand
+		if err := decodeJSON(r, &cmd); err != nil {
+			api.WriteError(w, err)
+			return
+		}
+		cmd.TenantID, cmd.StoreID, cmd.Direction, cmd.ActorUserID = c.TenantID, c.StoreID, "receivable", c.UserID
+		cmd.IdempotencyKey = strings.TrimSpace(r.Header.Get("Idempotency-Key"))
+		if cmd.IdempotencyKey == "" {
+			api.WriteError(w, api.BadRequest("missing_idempotency_key", "Idempotency-Key header is required"))
+			return
+		}
+		out, err := financeSvc.CreateCheck(r.Context(), cmd)
+		if err != nil {
+			api.WriteError(w, api.Conflict("receivable_check_rejected", err.Error()))
+			return
+		}
+		api.WriteJSON(w, http.StatusCreated, out)
+	})))
+	protected.Handle("POST /v1/checks/payable", auth.RequireRoles("owner", "admin", "accountant")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, _ := auth.ClaimsFrom(r.Context())
+		var cmd finance.CheckCommand
+		if err := decodeJSON(r, &cmd); err != nil {
+			api.WriteError(w, err)
+			return
+		}
+		cmd.TenantID, cmd.StoreID, cmd.Direction, cmd.ActorUserID = c.TenantID, c.StoreID, "payable", c.UserID
+		cmd.IdempotencyKey = strings.TrimSpace(r.Header.Get("Idempotency-Key"))
+		if cmd.IdempotencyKey == "" {
+			api.WriteError(w, api.BadRequest("missing_idempotency_key", "Idempotency-Key header is required"))
+			return
+		}
+		out, err := financeSvc.CreateCheck(r.Context(), cmd)
+		if err != nil {
+			api.WriteError(w, api.Conflict("payable_check_rejected", err.Error()))
+			return
+		}
+		api.WriteJSON(w, http.StatusCreated, out)
+	})))
+	protected.Handle("POST /v1/checks/{id}/transition", auth.RequireRoles("owner", "admin", "cashier", "accountant")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, _ := auth.ClaimsFrom(r.Context())
+		id, err := uuid.Parse(r.PathValue("id"))
+		if err != nil {
+			api.WriteError(w, api.BadRequest("invalid_check_id", "check id must be a UUID"))
+			return
+		}
+		var cmd finance.CheckTransitionCommand
+		if err := decodeJSON(r, &cmd); err != nil {
+			api.WriteError(w, err)
+			return
+		}
+		cmd.TenantID, cmd.StoreID, cmd.ActorUserID, cmd.ActorRole, cmd.CheckID = c.TenantID, c.StoreID, c.UserID, c.Role, id
+		cmd.IdempotencyKey = strings.TrimSpace(r.Header.Get("Idempotency-Key"))
+		if cmd.IdempotencyKey == "" {
+			api.WriteError(w, api.BadRequest("missing_idempotency_key", "Idempotency-Key header is required"))
+			return
+		}
+		out, err := financeSvc.TransitionCheck(r.Context(), cmd)
+		if err != nil {
+			api.WriteError(w, api.Conflict("check_transition_rejected", err.Error()))
+			return
+		}
+		api.WriteJSON(w, http.StatusOK, out)
 	})))
 
 	protected.Handle("POST /v1/settlements/customer-receipts", auth.RequireRoles("owner", "admin", "cashier", "accountant")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

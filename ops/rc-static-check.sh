@@ -29,7 +29,9 @@ grep -Fq 'NEXT_PUBLIC_SHOW_DEV_CREDENTIALS: "false"' docker-compose.prod.yml || 
 
 grep -Fq '127.0.0.1:17624' internal/storeedge/store.go || fail 'Store Edge must bind loopback by default'
 grep -Fq 'offline sales support cash or card only' cmd/api/main.go || fail 'offline payment safety guard is missing'
-grep -Fq '014_store_edge_offline.sql' cmd/api/main.go || fail 'API readiness is not pinned to Store Edge migration'
+grep -Fq '015_checks_banking.sql' cmd/api/main.go || fail 'API readiness is not pinned to checks/banking migration'
+grep -Fq 'CREATE TABLE checks' migrations/015_checks_banking.sql || fail 'checks migration is missing checks table'
+grep -Fq 'CREATE TABLE store_bank_accounts' migrations/015_checks_banking.sql || fail 'checks migration is missing store bank accounts'
 grep -Fq 'AUTOPARTS_EDGE_ALLOW_MOCK_POS' internal/storeedge/hardware.go || fail 'mock POS is not explicitly gated'
 grep -Fq 'AUTOPARTS_EDGE_ALLOW_FILE_TRANSPORT' internal/storeedge/hardware.go || fail 'QA file printer transport is not explicitly gated'
 if grep -Fq 'AUTOPARTS_EDGE_ALLOW_MOCK_POS=true' docker-compose.prod.yml; then fail 'mock POS must never be enabled in production compose'; fi

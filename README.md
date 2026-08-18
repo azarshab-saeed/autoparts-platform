@@ -219,3 +219,7 @@ Store Edge دیگر مستقیماً به‌عنوان process/service قابل 
 ## Phase 15.8.1.1 — One-click Agent Bootstrap
 
 `/store/edge` حالا قبل از نصب Manager سیستم‌عامل/معماری را تشخیص می‌دهد و Installer رسمی Windows یا Linux را پیشنهاد می‌کند. Windows x64 با Setup امضاشدنی و Linux Debian/Ubuntu با DEB روی amd64/arm64 پوشش داده می‌شوند. بعد از تأیید نصب توسط خود سیستم‌عامل، صفحه به‌صورت خودکار Manager را روی loopback پیدا می‌کند و تمام Start/Stop/Restart/Update از همان UI انجام می‌شود. Release assets با tagهای `store-agent-v*` تولید و روی GitHub Release منتشر می‌شوند. Runbook: `PHASE_15_8_1_1_RUN.md`.
+
+## Phase 15.9 — Checks & Banking
+
+بخش `/store/checks` مدیریت واقعی چک و بانک را به هسته حسابداری اضافه می‌کند: چک دریافتنی/پرداختی، سررسید، واگذاری و وصول، برگشتی، خرج‌کردن چک برای تأمین‌کننده و گردش حساب بانکی. ثبت و تغییر وضعیت چک‌ها با party ledger و double-entry journal اتمیک است و تاریخ شمسی مانند `۱۴۰۵/۰۵/۲۷` پذیرفته می‌شود. Migration: `015_checks_banking.sql`. Runbook: `PHASE_15_9_RUN.md`.

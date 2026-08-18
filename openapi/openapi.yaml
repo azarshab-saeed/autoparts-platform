@@ -1,8 +1,8 @@
 openapi: 3.1.0
 info:
   title: Auto Parts Platform API
-  version: 0.15.7
-  description: Phase 15.7 Store Edge contract. Adds one-time device pairing, durable offline cash/card sales, local catalog snapshots, device-authenticated sync, and conflict visibility while preserving the Phase 15.6 adoption contract. Monetary integer fields use Iranian toman (application currency code IRT).
+  version: 0.15.9
+  description: Phase 15.9 checks and banking contract. Adds store bank accounts, receivable/payable cheque lifecycle, Persian-date input, endorsement, bounce/return accounting, and bank ledger while preserving Store Edge and hardware contracts. Monetary integer fields use Iranian toman (application currency code IRT).
 servers:
 - url: http://localhost:8080
 components:
@@ -753,6 +753,53 @@ components:
         closed_by_user_id: {type: string, format: uuid}
         note: {type: string}
         created_at: {type: string, format: date-time}
+    BankAccount:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        name: {type: string}
+        bank_name: {type: string}
+        account_number: {type: string}
+        card_number: {type: string}
+        iban: {type: string}
+        opening_balance: {type: integer}
+        balance: {type: integer}
+        active: {type: boolean}
+        is_default: {type: boolean}
+        created_at: {type: string, format: date-time}
+    StoreCheck:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        direction: {type: string, enum: [receivable, payable]}
+        customer_id: {type: [string, 'null'], format: uuid}
+        customer_name: {type: string}
+        supplier_id: {type: [string, 'null'], format: uuid}
+        supplier_name: {type: string}
+        check_number: {type: string}
+        sayad_id: {type: string}
+        bank_name: {type: string}
+        branch_name: {type: string}
+        amount: {type: integer, minimum: 1}
+        issue_date: {type: string, format: date}
+        due_date: {type: string, format: date}
+        status: {type: string, enum: [held, deposited, cleared, bounced, endorsed, returned, cancelled, issued]}
+        bank_account_id: {type: [string, 'null'], format: uuid}
+        bank_account_name: {type: string}
+        endorsed_supplier_id: {type: [string, 'null'], format: uuid}
+        endorsed_supplier_name: {type: string}
+        note: {type: string}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+    CheckSummary:
+      type: object
+      properties:
+        receivable_open_amount: {type: integer}
+        payable_open_amount: {type: integer}
+        due_today_count: {type: integer}
+        due_next_7_count: {type: integer}
+        overdue_count: {type: integer}
+        bounced_count: {type: integer}
 paths:
   /healthz:
     get:
@@ -1624,3 +1671,67 @@ paths:
       responses:
         '201': {description: Offline sale posted or idempotently replayed}
         '409': {description: Cloud inventory/business conflict; local Edge record must remain for review}
+  /v1/banking/accounts:
+    get:
+      description: List store-scoped bank accounts with accounting balance.
+      security: [{keycloakOIDC: []}]
+      responses:
+        '200': {description: Bank accounts}
+    post:
+      description: Create a store bank account and optionally post opening balance.
+      security: [{keycloakOIDC: []}]
+      parameters:
+      - {in: header, name: Idempotency-Key, required: true, schema: {type: string}}
+      responses:
+        '201': {description: Bank account created, content: {application/json: {schema: {$ref: '#/components/schemas/BankAccount'}}}}
+  /v1/banking/accounts/{id}/ledger:
+    get:
+      description: Accounting ledger for one store bank account.
+      security: [{keycloakOIDC: []}]
+      parameters:
+      - {in: path, name: id, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: Bank ledger}
+  /v1/checks:
+    get:
+      description: List store cheques by direction/status/search term.
+      security: [{keycloakOIDC: []}]
+      parameters:
+      - {in: query, name: direction, schema: {type: string, enum: [receivable, payable]}}
+      - {in: query, name: status, schema: {type: string}}
+      - {in: query, name: q, schema: {type: string}}
+      - {in: query, name: limit, schema: {type: integer}}
+      - {in: query, name: cursor, schema: {type: string}}
+      responses:
+        '200': {description: Cheque page}
+  /v1/checks/summary:
+    get:
+      description: Open receivable/payable, due, overdue and bounced cheque summary.
+      security: [{keycloakOIDC: []}]
+      responses:
+        '200': {description: Cheque summary, content: {application/json: {schema: {$ref: '#/components/schemas/CheckSummary'}}}}
+  /v1/checks/receivable:
+    post:
+      description: Receive a customer cheque; posts Cheques Receivable vs AR and customer ledger. Persian dates such as 1405/05/27 are accepted.
+      security: [{keycloakOIDC: []}]
+      parameters:
+      - {in: header, name: Idempotency-Key, required: true, schema: {type: string}}
+      responses:
+        '201': {description: Receivable cheque created, content: {application/json: {schema: {$ref: '#/components/schemas/StoreCheck'}}}}
+  /v1/checks/payable:
+    post:
+      description: Issue a supplier cheque; posts AP vs Cheques Payable and supplier ledger.
+      security: [{keycloakOIDC: []}]
+      parameters:
+      - {in: header, name: Idempotency-Key, required: true, schema: {type: string}}
+      responses:
+        '201': {description: Payable cheque created, content: {application/json: {schema: {$ref: '#/components/schemas/StoreCheck'}}}}
+  /v1/checks/{id}/transition:
+    post:
+      description: Transition cheque lifecycle. Receivable actions include deposit, clear, bounce, endorse, return_endorsement and cancel; payable actions include clear, return and cancel. Accounting reversal/transfer is atomic.
+      security: [{keycloakOIDC: []}]
+      parameters:
+      - {in: path, name: id, required: true, schema: {type: string, format: uuid}}
+      - {in: header, name: Idempotency-Key, required: true, schema: {type: string}}
+      responses:
+        '200': {description: Cheque transitioned, content: {application/json: {schema: {$ref: '#/components/schemas/StoreCheck'}}}}

@@ -6,7 +6,7 @@ import { getCustomerBalances, getPartyStatement, getSupplierBalances, postCustom
 import type { PartyBalance, PartyStatement } from "@/lib/types";
 
 const money=(v:number)=>new Intl.NumberFormat("fa-IR").format(Math.abs(v));
-const entryLabel:Record<string,string>={sale:"فروش نسیه",purchase:"خرید نسیه",receipt:"دریافت",payment:"پرداخت",sale_return:"مرجوعی فروش",purchase_return:"مرجوعی خرید"};
+const entryLabel:Record<string,string>={sale:"فروش نسیه",purchase:"خرید نسیه",receipt:"دریافت",payment:"پرداخت",sale_return:"مرجوعی فروش",purchase_return:"مرجوعی خرید",check_receipt:"دریافت چک",check_bounce:"برگشت چک",check_payment:"پرداخت با چک",check_return:"عودت چک"};
 type Tab="customers"|"suppliers";
 export default function AccountsPage(){
  const {session}=useAuth();const [tab,setTab]=useState<Tab>("customers");const [customers,setCustomers]=useState<PartyBalance[]>([]);const [suppliers,setSuppliers]=useState<PartyBalance[]>([]);const [q,setQ]=useState("");const [selected,setSelected]=useState<PartyBalance|null>(null);const [statement,setStatement]=useState<PartyStatement|null>(null);const [statementLoading,setStatementLoading]=useState(false);const [amount,setAmount]=useState(0);const [method,setMethod]=useState<"cash"|"card">("card");const [note,setNote]=useState("");const [busy,setBusy]=useState(false);const [error,setError]=useState("");const [success,setSuccess]=useState("");

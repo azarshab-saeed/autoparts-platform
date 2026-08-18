@@ -1,9 +1,9 @@
 {
   "release": "0.15.0-rc.1",
-  "phase": "15.8.1.1",
-  "baseline_commit": "phase15.7.1.1-local",
-  "baseline_message": "fix: allow Store Edge local UI pairing origin",
-  "required_migration": "014_store_edge_offline.sql",
+  "phase": "15.9",
+  "baseline_commit": "5b62d6a6b3747fe4da58256957b7fcde882c9f9f",
+  "baseline_message": "feat: add one-click Store Agent bootstrap",
+  "required_migration": "015_checks_banking.sql",
   "postgres_image": "postgres:18.4",
   "keycloak_image": "keycloak/keycloak:26.7.0",
   "qa_client": "autoparts-qa",
@@ -21,6 +21,7 @@
     "store hardware bridge adapters + safety tests",
     "Store Agent one-click Windows/Linux bootstrap + lifecycle handoff",
     "database accounting/inventory invariants",
-    "network-search performance baseline"
+    "network-search performance baseline",
+    "checks/banking lifecycle + double-entry + Persian due-date safety"
   ]
 }

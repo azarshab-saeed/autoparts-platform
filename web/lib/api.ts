@@ -15,7 +15,7 @@ import type {
   SaleItem,
   SettlementResult,
   Supplier,
-  UserSession, NetworkSearchResult, NetworkStoreOffer, StoreNetworkProfile, NetworkReservation, NetworkReservationStatus, ReservationFulfillmentResult, Expense, ExpenseCategory, PartyStatement, ProfitLoss, CashReport, DailyClosing, DashboardSummary, InventoryInsightReport, PagedResult, PurchaseHistoryItem, SaleHistoryItem, NetworkProcurement, ProcurementReceiveResult, VehicleMake, ProductSearchMetadata, ProductSearchTerm, ProductFitmentInput, AuditLogEntry, ProductImportRow, ProductImportResult, EdgePairing, EdgeDevice
+  UserSession, NetworkSearchResult, NetworkStoreOffer, StoreNetworkProfile, NetworkReservation, NetworkReservationStatus, ReservationFulfillmentResult, Expense, ExpenseCategory, PartyStatement, ProfitLoss, CashReport, DailyClosing, DashboardSummary, InventoryInsightReport, PagedResult, PurchaseHistoryItem, SaleHistoryItem, NetworkProcurement, ProcurementReceiveResult, VehicleMake, ProductSearchMetadata, ProductSearchTerm, ProductFitmentInput, AuditLogEntry, ProductImportRow, ProductImportResult, EdgePairing, EdgeDevice, BankAccount, BankLedger, StoreCheck, CheckSummary, CheckDirection, CheckAction
 } from "./types";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
@@ -208,6 +208,48 @@ export async function postCustomerReceipt(session:UserSession, customerId:string
 export async function postSupplierPayment(session:UserSession, supplierId:string, amount:number, method:"cash"|"card", note=""):Promise<SettlementResult>{
   if(MOCK_MODE){await new Promise(r=>setTimeout(r,250));return{id:crypto.randomUUID(),party_type:"supplier",method,amount,balance:applyMockSettlement("supplier",supplierId,amount),status:"posted"};}
   return request<SettlementResult>("/v1/settlements/supplier-payments",{method:"POST",headers:{"Idempotency-Key":crypto.randomUUID()},body:JSON.stringify({supplier_id:supplierId,amount,method,note})},session.token);
+}
+
+let mockBankAccounts:BankAccount[]=[];
+let mockChecks:StoreCheck[]=[];
+
+export async function getBankAccounts(session:UserSession):Promise<BankAccount[]>{
+  if(MOCK_MODE)return mockBankAccounts.map(x=>({...x}));
+  const out=await request<{items:BankAccount[]}>("/v1/banking/accounts",{},session.token);return out.items??[];
+}
+export async function createBankAccount(session:UserSession,input:{name:string;bankName:string;accountNumber?:string;cardNumber?:string;iban?:string;openingBalance:number;isDefault:boolean}):Promise<BankAccount>{
+  if(MOCK_MODE){const x:BankAccount={id:crypto.randomUUID(),name:input.name,bank_name:input.bankName,account_number:input.accountNumber,card_number:input.cardNumber,iban:input.iban,opening_balance:input.openingBalance,balance:input.openingBalance,active:true,is_default:input.isDefault,created_at:new Date().toISOString()};if(input.isDefault)mockBankAccounts=mockBankAccounts.map(b=>({...b,is_default:false}));mockBankAccounts=[x,...mockBankAccounts];return x;}
+  return request<BankAccount>("/v1/banking/accounts",{method:"POST",headers:{"Idempotency-Key":crypto.randomUUID()},body:JSON.stringify({name:input.name,bank_name:input.bankName,account_number:input.accountNumber||"",card_number:input.cardNumber||"",iban:input.iban||"",opening_balance:input.openingBalance,is_default:input.isDefault})},session.token);
+}
+export async function getBankLedger(session:UserSession,id:string):Promise<BankLedger>{
+  if(MOCK_MODE){const account=mockBankAccounts.find(x=>x.id===id);if(!account)throw new Error("حساب بانکی پیدا نشد");return{account:{...account},items:[]};}
+  return request<BankLedger>(`/v1/banking/accounts/${encodeURIComponent(id)}/ledger`,{},session.token);
+}
+export async function getChecks(session:UserSession,opts:{direction?:CheckDirection;status?:string;q?:string;cursor?:string;limit?:number}={}):Promise<PagedResult<StoreCheck>>{
+  if(MOCK_MODE){let items=mockChecks.filter(x=>(!opts.direction||x.direction===opts.direction)&&(!opts.status||x.status===opts.status)&&(!opts.q||[x.check_number,x.sayad_id,x.customer_name,x.supplier_name].filter(Boolean).some(v=>String(v).includes(opts.q!))));return{items,total:items.length,next_cursor:""};}
+  const p=new URLSearchParams({limit:String(opts.limit||100)});if(opts.direction)p.set("direction",opts.direction);if(opts.status)p.set("status",opts.status);if(opts.q)p.set("q",opts.q);if(opts.cursor)p.set("cursor",opts.cursor);return request<PagedResult<StoreCheck>>(`/v1/checks?${p.toString()}`,{},session.token);
+}
+export async function getCheckSummary(session:UserSession):Promise<CheckSummary>{
+  if(MOCK_MODE){const today=new Date().toISOString().slice(0,10);const next=new Date(Date.now()+7*86400000).toISOString().slice(0,10);const open=(x:StoreCheck)=>["held","deposited","issued","returned"].includes(x.status);return{receivable_open_amount:mockChecks.filter(x=>x.direction==="receivable"&&["held","deposited","returned"].includes(x.status)).reduce((s,x)=>s+x.amount,0),payable_open_amount:mockChecks.filter(x=>x.direction==="payable"&&x.status==="issued").reduce((s,x)=>s+x.amount,0),due_today_count:mockChecks.filter(x=>open(x)&&x.due_date===today).length,due_next_7_count:mockChecks.filter(x=>open(x)&&x.due_date>today&&x.due_date<=next).length,overdue_count:mockChecks.filter(x=>open(x)&&x.due_date<today).length,bounced_count:mockChecks.filter(x=>x.status==="bounced").length};}
+  return request<CheckSummary>("/v1/checks/summary",{},session.token);
+}
+export async function createStoreCheck(session:UserSession,direction:CheckDirection,input:{partyId:string;checkNumber:string;sayadId?:string;bankName?:string;branchName?:string;amount:number;issueDate:string;dueDate:string;note?:string}):Promise<StoreCheck>{
+  if(MOCK_MODE){const customer=direction==="receivable"?getMockCustomerBalances().find(x=>x.id===input.partyId):undefined;const supplier=direction==="payable"?getMockSupplierBalances().find(x=>x.id===input.partyId):undefined;const x:StoreCheck={id:crypto.randomUUID(),direction,...(customer?{customer_id:customer.id,customer_name:customer.name}:{}),...(supplier?{supplier_id:supplier.id,supplier_name:supplier.name}:{}),check_number:input.checkNumber,sayad_id:input.sayadId,bank_name:input.bankName,branch_name:input.branchName,amount:input.amount,issue_date:input.issueDate,due_date:input.dueDate,status:direction==="receivable"?"held":"issued",note:input.note,created_at:new Date().toISOString(),updated_at:new Date().toISOString()};mockChecks=[x,...mockChecks];applyMockSettlement(direction==="receivable"?"customer":"supplier",input.partyId,input.amount);return x;}
+  const party=direction==="receivable"?{customer_id:input.partyId}:{supplier_id:input.partyId};return request<StoreCheck>(`/v1/checks/${direction}`,{method:"POST",headers:{"Idempotency-Key":crypto.randomUUID()},body:JSON.stringify({...party,check_number:input.checkNumber,sayad_id:input.sayadId||"",bank_name:input.bankName||"",branch_name:input.branchName||"",amount:input.amount,issue_date:input.issueDate,due_date:input.dueDate,note:input.note||""})},session.token);
+}
+export async function transitionStoreCheck(session:UserSession,id:string,action:CheckAction,input:{bankAccountId?:string;supplierId?:string;note?:string}={}):Promise<StoreCheck>{
+  if(MOCK_MODE){
+    const i=mockChecks.findIndex(x=>x.id===id);if(i<0)throw new Error("چک پیدا نشد");const current=mockChecks[i];
+    const nextStatus:Record<CheckAction,StoreCheck["status"]>={deposit:"deposited",clear:"cleared",bounce:"bounced",endorse:"endorsed",return_endorsement:"returned",return:"returned",cancel:"cancelled"};
+    if(action==="bounce"&&current.customer_id)addMockPartyBalance("customer",current.customer_id,current.amount);
+    if(action==="cancel"&&current.direction==="receivable"&&current.customer_id)addMockPartyBalance("customer",current.customer_id,current.amount);
+    if(action==="endorse"&&input.supplierId)applyMockSettlement("supplier",input.supplierId,current.amount);
+    if(action==="return_endorsement"&&current.endorsed_supplier_id)addMockPartyBalance("supplier",current.endorsed_supplier_id,current.amount);
+    if((action==="return"||action==="cancel")&&current.direction==="payable"&&current.supplier_id)addMockPartyBalance("supplier",current.supplier_id,current.amount);
+    if(action==="clear"&&input.bankAccountId){const b=mockBankAccounts.find(x=>x.id===input.bankAccountId);if(b)b.balance+=current.direction==="receivable"?current.amount:-current.amount;}
+    const updated={...current,status:nextStatus[action],bank_account_id:input.bankAccountId||current.bank_account_id,endorsed_supplier_id:action==="endorse"?input.supplierId:(action==="return_endorsement"?undefined:current.endorsed_supplier_id),updated_at:new Date().toISOString()};mockChecks[i]=updated;return{...updated};
+  }
+  return request<StoreCheck>(`/v1/checks/${encodeURIComponent(id)}/transition`,{method:"POST",headers:{"Idempotency-Key":crypto.randomUUID()},body:JSON.stringify({action,bank_account_id:input.bankAccountId||undefined,supplier_id:input.supplierId||undefined,note:input.note||""})},session.token);
 }
 export async function getSaleDetail(session:UserSession,id:string):Promise<SaleDetail>{ if(MOCK_MODE){if(id!==mockSaleDetail.id)throw new Error(`در Mock Mode شناسه نمونه: ${mockSaleDetail.id}`);return structuredClone(mockSaleDetail);} return request<SaleDetail>(`/v1/sales/${encodeURIComponent(id)}`,{},session.token);}
 export async function getPurchaseDetail(session:UserSession,id:string):Promise<PurchaseDetail>{ if(MOCK_MODE){if(id!==mockPurchaseDetail.id)throw new Error(`در Mock Mode شناسه نمونه: ${mockPurchaseDetail.id}`);return structuredClone(mockPurchaseDetail);} return request<PurchaseDetail>(`/v1/purchases/${encodeURIComponent(id)}`,{},session.token);}
