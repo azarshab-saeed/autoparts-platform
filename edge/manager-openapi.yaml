@@ -1,0 +1,87 @@
+openapi: 3.0.3
+info:
+  title: AutoParts Store Edge Lifecycle Manager API
+  version: 0.15.8.1
+  description: Local loopback control-plane API for Store Edge start/stop/restart and signed updates.
+servers:
+  - url: http://127.0.0.1:17623
+paths:
+  /healthz:
+    get:
+      summary: Manager liveness
+      responses:
+        '200': {description: OK}
+  /v1/lifecycle/status:
+    get:
+      summary: Manager, worker and update status
+      responses:
+        '200':
+          description: Lifecycle status
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/LifecycleStatus'}
+  /v1/lifecycle/start:
+    post:
+      summary: Start Store Edge worker
+      responses:
+        '200': {description: Starting}
+  /v1/lifecycle/stop:
+    post:
+      summary: Gracefully stop Store Edge worker while manager stays alive
+      responses:
+        '200': {description: Stopped}
+  /v1/lifecycle/restart:
+    post:
+      summary: Restart Store Edge worker
+      responses:
+        '200': {description: Restarting}
+  /v1/lifecycle/update/check:
+    post:
+      summary: Check signed update manifest
+      responses:
+        '200':
+          description: Update check result
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/UpdateCheck'}
+  /v1/lifecycle/update/apply:
+    post:
+      summary: Download, verify and apply signed Store Agent update
+      responses:
+        '202': {description: Update accepted}
+components:
+  schemas:
+    WorkerStatus:
+      type: object
+      required: [state, healthy]
+      properties:
+        state: {type: string, enum: [running, starting, stopped]}
+        pid: {type: integer}
+        version: {type: string}
+        started_at: {type: string, format: date-time}
+        last_exit_at: {type: string, format: date-time}
+        last_exit_error: {type: string}
+        healthy: {type: boolean}
+    LifecycleStatus:
+      type: object
+      required: [manager_version, os, arch, service_mode, worker, update_enabled, update_state, update_available]
+      properties:
+        manager_version: {type: string}
+        os: {type: string}
+        arch: {type: string}
+        service_mode: {type: string}
+        worker: {$ref: '#/components/schemas/WorkerStatus'}
+        update_enabled: {type: boolean}
+        update_state: {type: string}
+        latest_version: {type: string}
+        update_available: {type: boolean}
+        last_update_error: {type: string}
+    UpdateCheck:
+      type: object
+      required: [current_version, latest_version, update_available]
+      properties:
+        current_version: {type: string}
+        latest_version: {type: string}
+        update_available: {type: boolean}
+        release_notes: {type: string}
+        published_at: {type: string, format: date-time}

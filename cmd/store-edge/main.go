@@ -22,7 +22,7 @@ import (
 	"github.com/example/autoparts-core/internal/storeedge"
 )
 
-var version = "0.15.8"
+var version = "0.15.8.1"
 
 const windowsServiceName = "AutoPartsStoreEdge"
 
@@ -59,6 +59,9 @@ func main() {
 }
 
 func runAgent(ctx context.Context, serviceMode bool) error {
+	agentCtx, cancelAgent := context.WithCancel(ctx)
+	defer cancelAgent()
+	managerToken := strings.TrimSpace(os.Getenv("AUTOPARTS_EDGE_MANAGER_TOKEN"))
 	dataDir, err := edgeDataDir(serviceMode)
 	if err != nil {
 		return err
@@ -85,6 +88,17 @@ func runAgent(ctx context.Context, serviceMode bool) error {
 	})
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "service": "autoparts-store-edge", "version": version, "mode": map[bool]string{true: "service", false: "console"}[serviceMode]})
+	})
+	mux.HandleFunc("POST /v1/admin/shutdown", func(w http.ResponseWriter, r *http.Request) {
+		if managerToken == "" || r.Header.Get("X-AutoParts-Manager-Token") != managerToken {
+			writeError(w, http.StatusForbidden, errors.New("manager authorization failed"))
+			return
+		}
+		writeJSON(w, http.StatusAccepted, map[string]string{"status": "shutting_down"})
+		go func() {
+			time.Sleep(80 * time.Millisecond)
+			cancelAgent()
+		}()
 	})
 	mux.HandleFunc("GET /v1/status", func(w http.ResponseWriter, r *http.Request) {
 		st := store.State()
@@ -284,7 +298,7 @@ func runAgent(ctx context.Context, serviceMode bool) error {
 		defer ticker.Stop()
 		for {
 			select {
-			case <-ctx.Done():
+			case <-agentCtx.Done():
 				return
 			case <-ticker.C:
 				syncCtx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
@@ -305,7 +319,7 @@ func runAgent(ctx context.Context, serviceMode bool) error {
 	}()
 
 	select {
-	case <-ctx.Done():
+	case <-agentCtx.Done():
 	case err := <-serveErr:
 		if err != nil {
 			return err

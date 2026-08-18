@@ -211,3 +211,7 @@ Phase 15.6 adds a network-value dashboard, action center, safe CSV migration/imp
 Store Edge 0.15.8 علاوه بر فروش آفلاین، gateway محلی سخت‌افزار صندوق است: receipt/label/A4 printer، barcode keyboard-wedge، cash drawer و POS provider bridge. Installer تولیدی ویندوز از Phase 15.7.1 حفظ شده و نسخه 0.15.8 را به‌صورت Windows Service با auto-start نصب می‌کند. Pairing-origin fix فاز 15.7.1.1 نیز در این baseline ادغام شده است.
 
 Runbook: `PHASE_15_8_RUN.md`
+
+## Phase 15.8.1 — Store Agent Lifecycle Manager
+
+Store Edge دیگر مستقیماً به‌عنوان process/service قابل توقف اجرا نمی‌شود. یک Manager محلی روی `127.0.0.1:17623` همیشه فعال می‌ماند و Worker فروش آفلاین/سخت‌افزار روی `127.0.0.1:17624` را Start/Stop/Restart می‌کند. صفحه `/store/edge` lifecycle را برای Windows و Linux مدیریت می‌کند و مسیر بروزرسانی امضاشده SHA-256 + Ed25519 نیز اضافه شده است. Runbook: `PHASE_15_8_1_RUN.md`.

@@ -1,35 +1,30 @@
 # AutoParts Store Agent - Windows release
 
-The customer-facing distribution is `AutoParts-Store-Agent-Setup-<version>.exe`.
-Customers do not run `go`, `make`, Docker, or PowerShell manually.
+Customer distribution is `AutoParts-Store-Agent-Setup-<version>.exe`. Customers do not run Go, Make, Docker, PowerShell, or Windows Services manually.
+
+## Runtime layout since 15.8.1
+
+- Manager: `C:\Program Files\AutoParts\StoreAgent\AutoPartsStoreEdgeManager.exe`
+- Worker: `C:\Program Files\AutoParts\StoreAgent\AutoPartsStoreEdge.exe`
+- Updater: `C:\Program Files\AutoParts\StoreAgent\AutoPartsStoreEdgeUpdater.exe`
+- Windows Service: `AutoPartsStoreEdgeManager`
+- Manager API: `http://127.0.0.1:17623/`
+- Worker/local POS: `http://127.0.0.1:17624/`
+- Offline data: `C:\ProgramData\AutoParts\StoreEdge\data`
+- Logs: `C:\ProgramData\AutoParts\StoreEdge\logs`
+
+The service is delayed-auto-start. Manager supervises the Worker, so Start/Stop/Restart from `/store/edge` never requires the user to open Services.msc. Upgrade removes the legacy `AutoPartsStoreEdge` direct service while preserving ProgramData.
 
 ## Release build
 
-On a Windows x64 release machine with Go and Inno Setup 6:
+On Windows x64 with Go and Inno Setup 6:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File edge/windows/build-installer.ps1 -Version 0.15.8
+$env:AUTOPARTS_EDGE_UPDATE_MANIFEST_URL="https://downloads.example.com/store-agent/windows-amd64.json"
+$env:AUTOPARTS_EDGE_UPDATE_PUBLIC_KEY="BASE64_ED25519_PUBLIC_KEY"
+powershell -ExecutionPolicy Bypass -File edge/windows/build-installer.ps1 -Version 0.15.8.1
 ```
 
-For a signed customer release, install the signing certificate in the Windows certificate store and set its SHA-1 thumbprint:
+For Authenticode signing, set `AUTOPARTS_SIGN_CERT_SHA1` as before. Ed25519 update signing is separate: only the public key is embedded in the Manager; the private release key stays outside the installer/build output.
 
-```powershell
-$env:AUTOPARTS_SIGN_CERT_SHA1="CERTIFICATE_THUMBPRINT"
-powershell -ExecutionPolicy Bypass -File edge/windows/build-installer.ps1 -Version 0.15.8
-```
-
-The script writes the Setup executable and a `.sha256` file to `dist/`.
-
-## Installed layout
-
-- Binary: `C:\Program Files\AutoParts\StoreAgent\AutoPartsStoreEdge.exe`
-- Windows Service: `AutoPartsStoreEdge` / `AutoParts Store Agent`
-- Offline data: `C:\ProgramData\AutoParts\StoreEdge\data`
-- Agent log: `C:\ProgramData\AutoParts\StoreEdge\logs\agent.log`
-- Local UI: `http://127.0.0.1:17624/`
-
-The service is delayed-auto-start and configured to restart after failures. The same Inno Setup AppId is kept across releases, so installing a newer Setup upgrades the existing installation while preserving ProgramData.
-
-## Developer fallback
-
-`install.ps1` and `uninstall.ps1` are retained for development/support. They also use the native Windows Service, not Startup-folder execution.
+The same Inno Setup AppId is retained, so a newer Setup upgrades the existing installation and preserves local offline data.
