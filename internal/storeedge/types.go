@@ -24,19 +24,31 @@ type PriceBreak struct {
 	UnitPrice int64   `json:"unit_price"`
 }
 
+type ProductUnit struct {
+	ProductUnitID string       `json:"product_unit_id"`
+	Code          string       `json:"code"`
+	Name          string       `json:"name"`
+	FactorToBase  float64      `json:"factor_to_base"`
+	Barcode       string       `json:"barcode,omitempty"`
+	IsBase        bool         `json:"is_base"`
+	PriceBreaks   []PriceBreak `json:"price_breaks,omitempty"`
+}
+
 type Product struct {
-	ProductID    string       `json:"product_id"`
-	Title        string       `json:"title"`
-	SKU          string       `json:"sku,omitempty"`
-	Brand        string       `json:"brand,omitempty"`
-	OEMCode      string       `json:"oem_code,omitempty"`
-	Barcode      string       `json:"barcode,omitempty"`
-	OnHand       float64      `json:"on_hand"`
-	Reserved     float64      `json:"reserved"`
-	Available    float64      `json:"available"`
-	SellingPrice int64        `json:"selling_price"`
-	PriceBreaks  []PriceBreak `json:"price_breaks,omitempty"`
-	UpdatedAt    time.Time    `json:"updated_at"`
+	ProductID              string        `json:"product_id"`
+	Title                  string        `json:"title"`
+	SKU                    string        `json:"sku,omitempty"`
+	Brand                  string        `json:"brand,omitempty"`
+	OEMCode                string        `json:"oem_code,omitempty"`
+	Barcode                string        `json:"barcode,omitempty"`
+	OnHand                 float64       `json:"on_hand"`
+	Reserved               float64       `json:"reserved"`
+	Available              float64       `json:"available"`
+	SellingPrice           int64         `json:"selling_price"`
+	AllowFractionalBaseQty bool          `json:"allow_fractional_base_qty"`
+	PriceBreaks            []PriceBreak  `json:"price_breaks,omitempty"` // base-unit compatibility
+	Units                  []ProductUnit `json:"units,omitempty"`
+	UpdatedAt              time.Time     `json:"updated_at"`
 }
 
 type Snapshot struct {
@@ -49,12 +61,17 @@ type Snapshot struct {
 }
 
 type LocalSaleItem struct {
-	ProductID     string  `json:"product_id"`
-	Title         string  `json:"title"`
-	Qty           float64 `json:"qty"`
-	UnitPrice     int64   `json:"unit_price"`
-	ManualPrice   bool    `json:"manual_price,omitempty"`
-	PreservePrice bool    `json:"preserve_price,omitempty"`
+	ProductID        string  `json:"product_id"`
+	ProductUnitID    string  `json:"product_unit_id,omitempty"`
+	Title            string  `json:"title"`
+	UnitCode         string  `json:"unit_code,omitempty"`
+	UnitName         string  `json:"unit_name,omitempty"`
+	ConversionFactor float64 `json:"conversion_factor,omitempty"`
+	Qty              float64 `json:"qty"` // commercial quantity
+	BaseQty          float64 `json:"base_qty,omitempty"`
+	UnitPrice        int64   `json:"unit_price"`
+	ManualPrice      bool    `json:"manual_price,omitempty"`
+	PreservePrice    bool    `json:"preserve_price,omitempty"`
 }
 
 type LocalSale struct {

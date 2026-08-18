@@ -35,23 +35,35 @@ type SnapshotPriceBreak struct {
 	UnitPrice int64   `json:"unit_price"`
 }
 
+type SnapshotProductUnit struct {
+	ProductUnitID uuid.UUID            `json:"product_unit_id"`
+	Code          string               `json:"code"`
+	Name          string               `json:"name"`
+	FactorToBase  float64              `json:"factor_to_base"`
+	Barcode       string               `json:"barcode,omitempty"`
+	IsBase        bool                 `json:"is_base"`
+	PriceBreaks   []SnapshotPriceBreak `json:"price_breaks,omitempty"`
+}
+
 type SnapshotPricingPolicy struct {
 	CashierMayOverride bool `json:"cashier_may_override"`
 }
 
 type SnapshotProduct struct {
-	ProductID    uuid.UUID            `json:"product_id"`
-	Title        string               `json:"title"`
-	SKU          string               `json:"sku,omitempty"`
-	Brand        string               `json:"brand,omitempty"`
-	OEMCode      string               `json:"oem_code,omitempty"`
-	Barcode      string               `json:"barcode,omitempty"`
-	OnHand       float64              `json:"on_hand"`
-	Reserved     float64              `json:"reserved"`
-	Available    float64              `json:"available"`
-	SellingPrice int64                `json:"selling_price"`
-	PriceBreaks  []SnapshotPriceBreak `json:"price_breaks,omitempty"`
-	UpdatedAt    time.Time            `json:"updated_at"`
+	ProductID              uuid.UUID             `json:"product_id"`
+	Title                  string                `json:"title"`
+	SKU                    string                `json:"sku,omitempty"`
+	Brand                  string                `json:"brand,omitempty"`
+	OEMCode                string                `json:"oem_code,omitempty"`
+	Barcode                string                `json:"barcode,omitempty"`
+	OnHand                 float64               `json:"on_hand"`
+	Reserved               float64               `json:"reserved"`
+	Available              float64               `json:"available"`
+	SellingPrice           int64                 `json:"selling_price"`
+	AllowFractionalBaseQty bool                  `json:"allow_fractional_base_qty"`
+	PriceBreaks            []SnapshotPriceBreak  `json:"price_breaks,omitempty"` // base-unit compatibility
+	Units                  []SnapshotProductUnit `json:"units,omitempty"`
+	UpdatedAt              time.Time             `json:"updated_at"`
 }
 
 type Snapshot struct {

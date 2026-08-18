@@ -133,3 +133,92 @@ func TestOfflineSalePreservesResolvedCustomerTierAndCustomerID(t *testing.T) {
 		t.Fatalf("preserved customer-tier unit price=%d want 85", got)
 	}
 }
+
+func TestOfflineSaleSupportsPackageBarcodeAndBaseInventory(t *testing.T) {
+	s, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SavePairing("http://example.invalid", "cashier", PairResponse{DeviceID: "d1", DeviceSecret: "s1", StoreID: "st", WarehouseID: "wh", StoreName: "store"}); err != nil {
+		t.Fatal(err)
+	}
+	p := Product{
+		ProductID: "p1", Title: "Oil Filter", Barcode: "111", Available: 24, OnHand: 24, SellingPrice: 100,
+		PriceBreaks: []PriceBreak{{MinQty: 1, UnitPrice: 100}},
+		Units: []ProductUnit{
+			{ProductUnitID: "u-base", Code: "pcs", Name: "عدد", FactorToBase: 1, Barcode: "111", IsBase: true, PriceBreaks: []PriceBreak{{MinQty: 1, UnitPrice: 100}}},
+			{ProductUnitID: "u-carton", Code: "carton", Name: "کارتن", FactorToBase: 12, Barcode: "222"},
+		},
+	}
+	if err := s.ReplaceSnapshot(Snapshot{Products: []Product{p}}); err != nil {
+		t.Fatal(err)
+	}
+	search := s.SearchCatalog("222", 10)
+	if len(search) != 1 || search[0].ProductID != "p1" {
+		t.Fatalf("package barcode did not find product: %+v", search)
+	}
+	sale, err := s.QueueSale("cash", "", []LocalSaleItem{{ProductID: "p1", ProductUnitID: "u-carton", Qty: 1, UnitPrice: 0}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	item := sale.Items[0]
+	if item.UnitPrice != 1200 || item.BaseQty != 12 || item.UnitName != "کارتن" || item.ConversionFactor != 12 {
+		t.Fatalf("unexpected package line: %+v", item)
+	}
+	if sale.TotalAmount != 1200 {
+		t.Fatalf("total=%d want 1200", sale.TotalAmount)
+	}
+	got := s.SearchCatalog("Oil", 10)[0]
+	if got.Available != 12 || got.OnHand != 12 {
+		t.Fatalf("base stock after carton sale on_hand=%v available=%v want 12", got.OnHand, got.Available)
+	}
+}
+
+func TestOfflineSaleUsesPackageSpecificPriceBreak(t *testing.T) {
+	s, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = s.SavePairing("http://example.invalid", "cashier", PairResponse{DeviceID: "d1", DeviceSecret: "s1", StoreID: "st", WarehouseID: "wh", StoreName: "store"})
+	p := Product{
+		ProductID: "p1", Title: "Oil Filter", Available: 60, OnHand: 60, SellingPrice: 100,
+		PriceBreaks: []PriceBreak{{MinQty: 1, UnitPrice: 100}, {MinQty: 24, UnitPrice: 90}},
+		Units: []ProductUnit{
+			{ProductUnitID: "u-base", Code: "pcs", Name: "عدد", FactorToBase: 1, IsBase: true, PriceBreaks: []PriceBreak{{MinQty: 1, UnitPrice: 100}, {MinQty: 24, UnitPrice: 90}}},
+			{ProductUnitID: "u-carton", Code: "carton", Name: "کارتن", FactorToBase: 12, PriceBreaks: []PriceBreak{{MinQty: 1, UnitPrice: 1100}, {MinQty: 2, UnitPrice: 1050}}},
+		},
+	}
+	if err := s.ReplaceSnapshot(Snapshot{Products: []Product{p}}); err != nil {
+		t.Fatal(err)
+	}
+	sale, err := s.QueueSale("cash", "", []LocalSaleItem{{ProductID: "p1", ProductUnitID: "u-carton", Qty: 2}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sale.Items[0].UnitPrice != 1050 || sale.Items[0].BaseQty != 24 || sale.TotalAmount != 2100 {
+		t.Fatalf("unexpected package tier sale: %+v", sale)
+	}
+}
+
+func TestReplaceSnapshotSubtractsPendingBaseQty(t *testing.T) {
+	dir := t.TempDir()
+	s, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = s.SavePairing("http://example.invalid", "cashier", PairResponse{DeviceID: "d1", DeviceSecret: "s1", StoreID: "st", WarehouseID: "wh", StoreName: "store"})
+	p := Product{ProductID: "p1", Title: "Filter", Available: 24, OnHand: 24, SellingPrice: 100, Units: []ProductUnit{{ProductUnitID: "base", IsBase: true, FactorToBase: 1}, {ProductUnitID: "carton", FactorToBase: 12}}}
+	if err := s.ReplaceSnapshot(Snapshot{Products: []Product{p}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.QueueSale("cash", "", []LocalSaleItem{{ProductID: "p1", ProductUnitID: "carton", Qty: 1}}); err != nil {
+		t.Fatal(err)
+	}
+	// A fresh cloud snapshot still reports 24 base units because the local sale is not synced yet.
+	if err := s.ReplaceSnapshot(Snapshot{Products: []Product{p}}); err != nil {
+		t.Fatal(err)
+	}
+	if got := s.SearchCatalog("Filter", 10)[0].Available; got != 12 {
+		t.Fatalf("available=%v want 12 after replaying pending base qty", got)
+	}
+}

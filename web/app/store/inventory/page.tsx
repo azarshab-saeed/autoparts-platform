@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { getInventory, postInventoryAdjustment, putReorderPoint } from "@/lib/api";
 import { useAuth } from "@/components/auth-provider";
 import Modal from "@/components/modal";
@@ -127,7 +128,7 @@ export default function InventoryPage() {
         <h1>انبار و کالاها</h1>
         <p>موجودی واقعی، رزرو، بهای میانگین و نقطه سفارش را یکجا کنترل کن.</p>
       </div>
-      <a className="primary-btn" href="/store/purchases">+ ثبت خرید</a>
+      <div className="head-actions"><Link className="primary-btn" href="/store/products/new">+ کالای جدید</Link><Link className="ghost-btn" href="/store/purchases">+ ثبت خرید</Link></div>
     </div>
 
     {success && <div className="success-box page-error">{success}</div>}
@@ -136,7 +137,7 @@ export default function InventoryPage() {
     <section className="inventory-stats">
       <article><span>کالاهای موجود</span><strong>{number(stats.sku)}</strong><small>ردیف موجودی</small></article>
       <article><span>رو به اتمام</span><strong className={stats.low ? "danger-text" : ""}>{number(stats.low)}</strong><small>نیازمند توجه</small></article>
-      <article><span>قابل فروش</span><strong>{number(stats.units)}</strong><small>جمع واحدها</small></article>
+      <article><span>قابل فروش</span><strong>{number(stats.units)}</strong><small>جمع مقادیر در واحد پایه هر کالا</small></article>
       <article><span>ارزش تقریبی انبار</span><strong>{money(stats.value)}</strong><small>بر اساس بهای میانگین</small></article>
     </section>
 
@@ -155,13 +156,13 @@ export default function InventoryPage() {
             {!loading && !filtered.length && <tr><td colSpan={8}><div className="table-state">کالایی با این فیلتر پیدا نشد.</div></td></tr>}
             {!loading && filtered.map(row => <tr key={row.product_id}>
               <td><div className="product-cell"><b>{row.title}</b><span>{row.sku || "بدون کد کالا"}</span></div></td>
-              <td>{number(row.on_hand)}</td>
-              <td>{number(row.reserved)}</td>
-              <td><b>{number(row.available)}</b></td>
+              <td>{number(row.on_hand)} <small>{row.base_unit_name||"واحد پایه"}</small></td>
+              <td>{number(row.reserved)} <small>{row.base_unit_name||""}</small></td>
+              <td><b>{number(row.available)}</b> <small>{row.base_unit_name||""}</small></td>
               <td>{money(row.avg_unit_cost)}</td>
               <td><span className="reorder-value">حداقل {number(row.min_qty)} / هدف {number(row.target_qty)}</span></td>
               <td>{row.low_stock ? <span className="status-pill danger">رو به اتمام</span> : <span className="status-pill ok">مناسب</span>}</td>
-              <td>{canManage && <div className="row-actions"><button onClick={() => openAdjust(row)}>اصلاح</button><button onClick={() => openReorder(row)}>حد سفارش</button></div>}</td>
+              <td>{canManage && <div className="row-actions"><Link href={`/store/products/${row.product_id}/units`}>واحدها/بارکد</Link><button onClick={() => openAdjust(row)}>اصلاح</button><button onClick={() => openReorder(row)}>حد سفارش</button></div>}</td>
             </tr>)}
           </tbody>
         </table>
@@ -171,7 +172,7 @@ export default function InventoryPage() {
     <Modal open={dialog === "adjust"} title="اصلاح موجودی" subtitle={selected?.title} onClose={() => setDialog(null)}>
       {error && <div className="error-box">{error}</div>}
       <div className="form-stack">
-        <label>تغییر تعداد <small>برای کسری عدد منفی وارد کن؛ مثلاً ۲-</small><input inputMode="decimal" value={qtyDelta} onChange={e => setQtyDelta(e.target.value)} placeholder="-2 یا 5"/></label>
+        <label>تغییر موجودی در واحد پایه {selected?.base_unit_name&&<b>({selected.base_unit_name})</b>} <small>برای کسری عدد منفی وارد کن؛ مثلاً ۲-</small><input inputMode="decimal" value={qtyDelta} onChange={e => setQtyDelta(e.target.value)} placeholder="-2 یا 5"/></label>
         <label>دلیل اصلاح<textarea value={reason} onChange={e => setReason(e.target.value)} placeholder="مثلاً شمارش فیزیکی انبار، شکستگی یا کسری"/></label>
       </div>
       <div className="modal-actions"><button className="ghost-btn" onClick={() => setDialog(null)}>انصراف</button><button className="primary-btn" disabled={saving} onClick={() => void saveAdjustment()}>{saving ? "در حال ثبت..." : "ثبت اصلاح"}</button></div>

@@ -176,7 +176,11 @@ func runAgent(ctx context.Context, serviceMode bool) error {
 		if hw.AutoPrintReceipt && hw.ReceiptPrinter.Enabled {
 			lines := make([]storeedge.ReceiptLine, 0, len(out.Items))
 			for _, x := range out.Items {
-				lines = append(lines, storeedge.ReceiptLine{Title: x.Title, Qty: x.Qty, UnitPrice: x.UnitPrice})
+				title := x.Title
+				if strings.TrimSpace(x.UnitName) != "" {
+					title += " — " + x.UnitName
+				}
+				lines = append(lines, storeedge.ReceiptLine{Title: title, Qty: x.Qty, UnitPrice: x.UnitPrice})
 			}
 			if err := bridge.PrintReceipt(r.Context(), storeedge.Receipt{Number: out.LocalNumber, StoreName: store.Config().StoreName, CreatedAt: out.CreatedAt, PaymentMethod: out.PaymentMethod, TotalAmount: out.TotalAmount, Lines: lines}); err != nil {
 				log.Printf("hardware receipt print warning: %v", err)

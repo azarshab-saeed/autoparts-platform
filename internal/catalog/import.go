@@ -15,19 +15,21 @@ import (
 const maxImportRows = 2000
 
 type ImportRow struct {
-	RowNumber        int     `json:"row_number"`
-	SKU              string  `json:"sku,omitempty"`
-	Title            string  `json:"title"`
-	Brand            string  `json:"brand,omitempty"`
-	OEMCode          string  `json:"oem_code,omitempty"`
-	Barcode          string  `json:"barcode,omitempty"`
-	Unit             string  `json:"unit,omitempty"`
-	OnHand           float64 `json:"on_hand"`
-	AvgUnitCost      int64   `json:"avg_unit_cost"`
-	SellingPrice     int64   `json:"selling_price"`
-	Visible          bool    `json:"visible"`
-	AllowReservation bool    `json:"allow_reservation"`
-	AllowProcurement bool    `json:"allow_procurement"`
+	RowNumber              int                 `json:"row_number"`
+	SKU                    string              `json:"sku,omitempty"`
+	Title                  string              `json:"title"`
+	Brand                  string              `json:"brand,omitempty"`
+	OEMCode                string              `json:"oem_code,omitempty"`
+	Barcode                string              `json:"barcode,omitempty"`
+	Unit                   string              `json:"unit,omitempty"`
+	OnHand                 float64             `json:"on_hand"`
+	AvgUnitCost            int64               `json:"avg_unit_cost"`
+	SellingPrice           int64               `json:"selling_price"`
+	Visible                bool                `json:"visible"`
+	AllowReservation       bool                `json:"allow_reservation"`
+	AllowProcurement       bool                `json:"allow_procurement"`
+	AllowFractionalBaseQty bool                `json:"allow_fractional_base_qty,omitempty"`
+	Units                  []CreateProductUnit `json:"units,omitempty"`
 }
 
 type ImportCommand struct {
@@ -134,10 +136,10 @@ func (s *Service) Import(ctx context.Context, cmd ImportCommand) (ImportResult, 
 			_, err = tx.Exec(ctx, `
 				UPDATE products
 				SET sku=COALESCE($3,sku),title=$4,brand=COALESCE($5,brand),oem_code=COALESCE($6,oem_code),
-				    barcode=COALESCE($7,barcode),unit=COALESCE(NULLIF($8,''),unit),
+				    barcode=COALESCE($7,barcode),allow_fractional_base_qty=allow_fractional_base_qty OR $8,
 				    normalized_title=lower(trim($4)),active=true,deleted_at=NULL,updated_at=now()
 				WHERE id=$1 AND tenant_id=$2`, productID, cmd.TenantID,
-				nullable(row.SKU), row.Title, nullable(row.Brand), nullable(row.OEMCode), nullable(row.Barcode), row.Unit)
+				nullable(row.SKU), row.Title, nullable(row.Brand), nullable(row.OEMCode), nullable(row.Barcode), row.AllowFractionalBaseQty)
 			if err != nil {
 				return ImportResult{}, err
 			}
@@ -145,14 +147,58 @@ func (s *Service) Import(ctx context.Context, cmd ImportCommand) (ImportResult, 
 		} else {
 			productID = uuid.New()
 			_, err = tx.Exec(ctx, `
-				INSERT INTO products(id,tenant_id,sku,title,brand,oem_code,barcode,unit,normalized_title,active)
-				VALUES($1,$2,$3,$4,$5,$6,$7,$8,lower(trim($4)),true)`,
-				productID, cmd.TenantID, nullable(row.SKU), row.Title, nullable(row.Brand), nullable(row.OEMCode), nullable(row.Barcode), unitOrPCS(row.Unit))
+				INSERT INTO products(id,tenant_id,sku,title,brand,oem_code,barcode,unit,allow_fractional_base_qty,normalized_title,active)
+				VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,lower(trim($4)),true)`,
+				productID, cmd.TenantID, nullable(row.SKU), row.Title, nullable(row.Brand), nullable(row.OEMCode), nullable(row.Barcode), unitOrPCS(row.Unit), row.AllowFractionalBaseQty)
 			if err != nil {
 				return ImportResult{}, err
 			}
 			productAction = "created"
 			out.CreatedCount++
+		}
+
+		var baseUnitID uuid.UUID
+		var baseUnitCode string
+		var allowFractional bool
+		if err = tx.QueryRow(ctx, `SELECT COALESCE(NULLIF(btrim(unit),''),'pcs'),allow_fractional_base_qty FROM products WHERE id=$1 AND tenant_id=$2`, productID, cmd.TenantID).Scan(&baseUnitCode, &allowFractional); err != nil {
+			return ImportResult{}, err
+		}
+		if _, err = tx.Exec(ctx, `INSERT INTO product_units(tenant_id,product_id,code,name,factor_to_base,barcode,is_base,allow_sale,allow_purchase,active)
+			SELECT $1,$2,$3,CASE $3 WHEN 'pcs' THEN 'عدد' WHEN 'pair' THEN 'جفت' WHEN 'set' THEN 'دست' WHEN 'pack' THEN 'بسته' WHEN 'carton' THEN 'کارتن' ELSE $3 END,1,NULLIF($4,''),true,true,true,true
+			WHERE NOT EXISTS(SELECT 1 FROM product_units WHERE tenant_id=$1 AND product_id=$2 AND is_base)`, cmd.TenantID, productID, baseUnitCode, row.Barcode); err != nil {
+			return ImportResult{}, err
+		}
+		if row.Barcode != "" {
+			// Allow an imported barcode to move from an old package definition to the canonical base unit.
+			if _, err = tx.Exec(ctx, `UPDATE product_units SET active=false,updated_at=now() WHERE tenant_id=$1 AND product_id=$2 AND NOT is_base AND barcode=$3`, cmd.TenantID, productID, row.Barcode); err != nil {
+				return ImportResult{}, err
+			}
+			if _, err = tx.Exec(ctx, `UPDATE product_units SET barcode=$3,updated_at=now(),active=true WHERE tenant_id=$1 AND product_id=$2 AND is_base`, cmd.TenantID, productID, row.Barcode); err != nil {
+				return ImportResult{}, err
+			}
+		}
+		if err = tx.QueryRow(ctx, `SELECT id FROM product_units WHERE tenant_id=$1 AND product_id=$2 AND is_base AND active`, cmd.TenantID, productID).Scan(&baseUnitID); err != nil {
+			return ImportResult{}, err
+		}
+		baseBarcode := cleanOptional(&row.Barcode)
+		validatedUnits, unitErr := validateAlternateUnits(baseUnitCode, baseBarcode, allowFractional, row.Units)
+		if unitErr != nil {
+			return ImportResult{}, &ImportValidationError{Rows: []ImportRowError{{RowNumber: row.RowNumber, Field: "units", Message: unitErr.Error()}}}
+		}
+		for _, u := range validatedUnits {
+			var unitID uuid.UUID
+			err = tx.QueryRow(ctx, `INSERT INTO product_units(tenant_id,product_id,code,name,factor_to_base,barcode,is_base,allow_sale,allow_purchase,active)
+				VALUES($1,$2,$3,$4,$5,NULLIF($6,''),false,$7,$8,true)
+				ON CONFLICT(tenant_id,product_id,code) DO UPDATE SET name=EXCLUDED.name,factor_to_base=EXCLUDED.factor_to_base,barcode=EXCLUDED.barcode,allow_sale=EXCLUDED.allow_sale,allow_purchase=EXCLUDED.allow_purchase,active=true,updated_at=now()
+				RETURNING id`, cmd.TenantID, productID, u.Code, u.Name, u.FactorToBase, cleanString(u.Barcode), u.AllowSale, u.AllowPurchase).Scan(&unitID)
+			if err != nil {
+				return ImportResult{}, err
+			}
+			if u.RetailPrice > 0 {
+				if _, err = tx.Exec(ctx, `INSERT INTO product_price_breaks(tenant_id,store_id,product_id,price_list_id,product_unit_id,min_qty,unit_price) VALUES($1,$2,$3,$4,$5,1,$6) ON CONFLICT(tenant_id,store_id,product_id,price_list_id,product_unit_id,min_qty) DO UPDATE SET unit_price=EXCLUDED.unit_price,updated_at=now()`, cmd.TenantID, cmd.StoreID, productID, defaultPriceListID, unitID, u.RetailPrice); err != nil {
+					return ImportResult{}, err
+				}
+			}
 		}
 
 		inventoryAction, note, openingValue, err := initializeImportInventory(ctx, tx, cmd, out.BatchID, row, productID)
@@ -180,10 +226,10 @@ func (s *Service) Import(ctx context.Context, cmd ImportCommand) (ImportResult, 
 				return ImportResult{}, err
 			}
 			if _, err = tx.Exec(ctx, `
-				INSERT INTO product_price_breaks(tenant_id,store_id,product_id,price_list_id,min_qty,unit_price)
-				VALUES($1,$2,$3,$4,1,$5)
-				ON CONFLICT(tenant_id,store_id,product_id,price_list_id,min_qty)
-				DO UPDATE SET unit_price=EXCLUDED.unit_price,updated_at=now()`, cmd.TenantID, cmd.StoreID, productID, defaultPriceListID, row.SellingPrice); err != nil {
+				INSERT INTO product_price_breaks(tenant_id,store_id,product_id,price_list_id,product_unit_id,min_qty,unit_price)
+				VALUES($1,$2,$3,$4,$5,1,$6)
+				ON CONFLICT(tenant_id,store_id,product_id,price_list_id,product_unit_id,min_qty)
+				DO UPDATE SET unit_price=EXCLUDED.unit_price,updated_at=now()`, cmd.TenantID, cmd.StoreID, productID, defaultPriceListID, baseUnitID, row.SellingPrice); err != nil {
 				return ImportResult{}, err
 			}
 			offerAction = "upserted"
@@ -259,6 +305,21 @@ func normalizeImportRows(in []ImportRow) ([]ImportRow, error) {
 		row.OEMCode = strings.TrimSpace(row.OEMCode)
 		row.Barcode = strings.TrimSpace(row.Barcode)
 		row.Unit = strings.TrimSpace(row.Unit)
+		for j := range row.Units {
+			u := &row.Units[j]
+			u.Code = normalizeUnitCode(u.Code)
+			u.Name = strings.TrimSpace(u.Name)
+			u.Barcode = cleanOptional(u.Barcode)
+			if u.Code == "" || u.Name == "" {
+				errs = append(errs, ImportRowError{RowNumber: row.RowNumber, Field: "units", Message: "کد و نام همه واحدهای بسته‌بندی الزامی است"})
+			}
+			if !isFinite(u.FactorToBase) || u.FactorToBase <= 0 {
+				errs = append(errs, ImportRowError{RowNumber: row.RowNumber, Field: "units", Message: fmt.Sprintf("ضریب تبدیل واحد %s معتبر نیست", u.Name)})
+			}
+			if !u.AllowSale && !u.AllowPurchase {
+				errs = append(errs, ImportRowError{RowNumber: row.RowNumber, Field: "units", Message: fmt.Sprintf("واحد %s باید برای خرید یا فروش فعال باشد", u.Name)})
+			}
+		}
 		if row.Title == "" {
 			errs = append(errs, ImportRowError{RowNumber: row.RowNumber, Field: "title", Message: "نام کالا الزامی است"})
 		}
@@ -289,6 +350,17 @@ func normalizeImportRows(in []ImportRow) ([]ImportRow, error) {
 			k := strings.ToLower(row.Barcode)
 			if first, ok := seenBarcode[k]; ok {
 				errs = append(errs, ImportRowError{RowNumber: row.RowNumber, Field: "barcode", Message: fmt.Sprintf("بارکد در همین فایل تکراری است (ردیف %d)", first)})
+			} else {
+				seenBarcode[k] = row.RowNumber
+			}
+		}
+		for _, u := range row.Units {
+			if u.Barcode == nil || strings.TrimSpace(*u.Barcode) == "" {
+				continue
+			}
+			k := strings.ToLower(strings.TrimSpace(*u.Barcode))
+			if first, ok := seenBarcode[k]; ok {
+				errs = append(errs, ImportRowError{RowNumber: row.RowNumber, Field: "units.barcode", Message: fmt.Sprintf("بارکد بسته‌بندی در همین فایل تکراری است (ردیف %d)", first)})
 			} else {
 				seenBarcode[k] = row.RowNumber
 			}

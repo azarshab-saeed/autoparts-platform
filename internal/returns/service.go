@@ -61,9 +61,9 @@ func (s *Service) CreateSaleReturn(ctx context.Context, cmd SaleReturnCommand) (
 			return Result{}, errors.New("invalid return item")
 		}
 		var productID uuid.UUID
-		var soldQty float64
+		var soldQty, factor float64
 		var unitPrice, unitCost int64
-		err = tx.QueryRow(ctx, `SELECT product_id,qty,unit_price,unit_cost FROM sale_items WHERE id=$1 AND tenant_id=$2 AND sale_id=$3 FOR UPDATE`, ri.SourceItemID, cmd.TenantID, cmd.SaleID).Scan(&productID, &soldQty, &unitPrice, &unitCost)
+		err = tx.QueryRow(ctx, `SELECT product_id,qty,unit_price,unit_cost,conversion_factor::float8 FROM sale_items WHERE id=$1 AND tenant_id=$2 AND sale_id=$3 FOR UPDATE`, ri.SourceItemID, cmd.TenantID, cmd.SaleID).Scan(&productID, &soldQty, &unitPrice, &unitCost, &factor)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return Result{}, fmt.Errorf("sale item %s not found", ri.SourceItemID)
 		}
@@ -74,11 +74,15 @@ func (s *Service) CreateSaleReturn(ctx context.Context, cmd SaleReturnCommand) (
 		if err = tx.QueryRow(ctx, `SELECT COALESCE(SUM(qty),0) FROM sales_return_items WHERE tenant_id=$1 AND sale_item_id=$2`, cmd.TenantID, ri.SourceItemID).Scan(&returned); err != nil {
 			return Result{}, err
 		}
-		if ri.Qty > soldQty-returned+1e-9 {
+		if factor <= 0 {
+			factor = 1
+		}
+		returnBaseQty := ri.Qty * factor
+		if returnBaseQty > soldQty-returned+1e-9 {
 			return Result{}, errors.New("return quantity exceeds remaining sale quantity")
 		}
 		line := int64(math.Round(ri.Qty * float64(unitPrice)))
-		cost := int64(math.Round(ri.Qty * float64(unitCost)))
+		cost := int64(math.Round(returnBaseQty * float64(unitCost)))
 		if total > math.MaxInt64-line || totalCost > math.MaxInt64-cost {
 			return Result{}, errors.New("return total overflow")
 		}
@@ -95,15 +99,15 @@ func (s *Service) CreateSaleReturn(ctx context.Context, cmd SaleReturnCommand) (
 		} else if err != nil {
 			return Result{}, err
 		}
-		newQty := oldQty + ri.Qty
-		newAvg := weightedAverage(oldQty, oldAvg, ri.Qty, unitCost)
+		newQty := oldQty + returnBaseQty
+		newAvg := weightedAverage(oldQty, oldAvg, returnBaseQty, unitCost)
 		if _, err = tx.Exec(ctx, `UPDATE inventory_balances SET on_hand=$4,avg_unit_cost=$5,updated_at=now() WHERE tenant_id=$1 AND warehouse_id=$2 AND product_id=$3`, cmd.TenantID, warehouseID, productID, newQty, newAvg); err != nil {
 			return Result{}, err
 		}
-		if _, err = tx.Exec(ctx, `INSERT INTO sales_return_items(tenant_id,sales_return_id,sale_item_id,product_id,qty,unit_price,unit_cost,line_total) VALUES($1,$2,$3,$4,$5,$6,$7,$8)`, cmd.TenantID, returnID, ri.SourceItemID, productID, ri.Qty, unitPrice, unitCost, line); err != nil {
+		if _, err = tx.Exec(ctx, `INSERT INTO sales_return_items(tenant_id,sales_return_id,sale_item_id,product_id,qty,unit_price,unit_cost,line_total) VALUES($1,$2,$3,$4,$5,$6,$7,$8)`, cmd.TenantID, returnID, ri.SourceItemID, productID, returnBaseQty, unitPrice, unitCost, line); err != nil {
 			return Result{}, err
 		}
-		if _, err = tx.Exec(ctx, `INSERT INTO inventory_movements(tenant_id,warehouse_id,product_id,movement_type,qty_delta,unit_cost,cost_delta,reference_type,reference_id) VALUES($1,$2,$3,'return_in',$4,$5,$6,'sale_return',$7)`, cmd.TenantID, warehouseID, productID, ri.Qty, unitCost, cost, returnID); err != nil {
+		if _, err = tx.Exec(ctx, `INSERT INTO inventory_movements(tenant_id,warehouse_id,product_id,movement_type,qty_delta,unit_cost,cost_delta,reference_type,reference_id) VALUES($1,$2,$3,'return_in',$4,$5,$6,'sale_return',$7)`, cmd.TenantID, warehouseID, productID, returnBaseQty, unitCost, cost, returnID); err != nil {
 			return Result{}, err
 		}
 	}
@@ -192,9 +196,9 @@ func (s *Service) CreatePurchaseReturn(ctx context.Context, cmd PurchaseReturnCo
 			return Result{}, errors.New("invalid return item")
 		}
 		var productID uuid.UUID
-		var boughtQty float64
+		var boughtQty, factor float64
 		var unitCost int64
-		err = tx.QueryRow(ctx, `SELECT product_id,qty,unit_cost FROM purchase_items WHERE id=$1 AND tenant_id=$2 AND purchase_id=$3 FOR UPDATE`, ri.SourceItemID, cmd.TenantID, cmd.PurchaseID).Scan(&productID, &boughtQty, &unitCost)
+		err = tx.QueryRow(ctx, `SELECT product_id,qty,unit_cost,conversion_factor::float8 FROM purchase_items WHERE id=$1 AND tenant_id=$2 AND purchase_id=$3 FOR UPDATE`, ri.SourceItemID, cmd.TenantID, cmd.PurchaseID).Scan(&productID, &boughtQty, &unitCost, &factor)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return Result{}, fmt.Errorf("purchase item %s not found", ri.SourceItemID)
 		}
@@ -205,10 +209,15 @@ func (s *Service) CreatePurchaseReturn(ctx context.Context, cmd PurchaseReturnCo
 		if err = tx.QueryRow(ctx, `SELECT COALESCE(SUM(qty),0) FROM purchase_return_items WHERE tenant_id=$1 AND purchase_item_id=$2`, cmd.TenantID, ri.SourceItemID).Scan(&returned); err != nil {
 			return Result{}, err
 		}
-		if ri.Qty > boughtQty-returned+1e-9 {
+		if factor <= 0 {
+			factor = 1
+		}
+		returnBaseQty := ri.Qty * factor
+		if returnBaseQty > boughtQty-returned+1e-9 {
 			return Result{}, errors.New("return quantity exceeds remaining purchase quantity")
 		}
 		line := int64(math.Round(ri.Qty * float64(unitCost)))
+		baseUnitCost := int64(math.Round(float64(unitCost) / factor))
 		if total > math.MaxInt64-line {
 			return Result{}, errors.New("return total overflow")
 		}
@@ -218,13 +227,13 @@ func (s *Service) CreatePurchaseReturn(ctx context.Context, cmd PurchaseReturnCo
 		if err = tx.QueryRow(ctx, `SELECT on_hand,reserved,avg_unit_cost FROM inventory_balances WHERE tenant_id=$1 AND warehouse_id=$2 AND product_id=$3 FOR UPDATE`, cmd.TenantID, warehouseID, productID).Scan(&oldQty, &reserved, &oldAvg); err != nil {
 			return Result{}, err
 		}
-		if oldQty-reserved < ri.Qty {
+		if oldQty-reserved < returnBaseQty {
 			return Result{}, errors.New("insufficient available stock for purchase return")
 		}
-		newQty := oldQty - ri.Qty
+		newQty := oldQty - returnBaseQty
 		newAvg := int64(0)
 		if newQty > 0 {
-			newValue := oldQty*float64(oldAvg) - ri.Qty*float64(unitCost)
+			newValue := oldQty*float64(oldAvg) - returnBaseQty*float64(baseUnitCost)
 			if newValue < -0.5 {
 				return Result{}, errors.New("purchase return conflicts with current weighted-average inventory value")
 			}
@@ -236,10 +245,10 @@ func (s *Service) CreatePurchaseReturn(ctx context.Context, cmd PurchaseReturnCo
 		if _, err = tx.Exec(ctx, `UPDATE inventory_balances SET on_hand=$4,avg_unit_cost=$5,updated_at=now() WHERE tenant_id=$1 AND warehouse_id=$2 AND product_id=$3`, cmd.TenantID, warehouseID, productID, newQty, newAvg); err != nil {
 			return Result{}, err
 		}
-		if _, err = tx.Exec(ctx, `INSERT INTO purchase_return_items(tenant_id,purchase_return_id,purchase_item_id,product_id,qty,unit_cost,line_total) VALUES($1,$2,$3,$4,$5,$6,$7)`, cmd.TenantID, returnID, ri.SourceItemID, productID, ri.Qty, unitCost, line); err != nil {
+		if _, err = tx.Exec(ctx, `INSERT INTO purchase_return_items(tenant_id,purchase_return_id,purchase_item_id,product_id,qty,unit_cost,line_total) VALUES($1,$2,$3,$4,$5,$6,$7)`, cmd.TenantID, returnID, ri.SourceItemID, productID, returnBaseQty, unitCost, line); err != nil {
 			return Result{}, err
 		}
-		if _, err = tx.Exec(ctx, `INSERT INTO inventory_movements(tenant_id,warehouse_id,product_id,movement_type,qty_delta,unit_cost,cost_delta,reference_type,reference_id) VALUES($1,$2,$3,'return_out',$4,$5,$6,'purchase_return',$7)`, cmd.TenantID, warehouseID, productID, -ri.Qty, unitCost, -line, returnID); err != nil {
+		if _, err = tx.Exec(ctx, `INSERT INTO inventory_movements(tenant_id,warehouse_id,product_id,movement_type,qty_delta,unit_cost,cost_delta,reference_type,reference_id) VALUES($1,$2,$3,'return_out',$4,$5,$6,'purchase_return',$7)`, cmd.TenantID, warehouseID, productID, -returnBaseQty, baseUnitCost, -line, returnID); err != nil {
 			return Result{}, err
 		}
 	}

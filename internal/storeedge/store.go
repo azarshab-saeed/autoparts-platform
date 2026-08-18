@@ -90,7 +90,11 @@ func (s *Store) ReplaceSnapshot(snapshot Snapshot) error {
 			continue
 		}
 		for _, item := range sale.Items {
-			pending[item.ProductID] += item.Qty
+			q := item.BaseQty
+			if q <= 0 {
+				q = item.Qty // compatibility with queues created before Phase 15.12
+			}
+			pending[item.ProductID] += q
 		}
 	}
 	for i := range snapshot.Products {
@@ -112,7 +116,11 @@ func (s *Store) SearchCatalog(q string, limit int) []Product {
 	q = normalize(q)
 	out := make([]Product, 0, limit)
 	for _, p := range s.state.Snapshot.Products {
-		hay := normalize(strings.Join([]string{p.Title, p.SKU, p.Brand, p.OEMCode, p.Barcode}, " "))
+		parts := []string{p.Title, p.SKU, p.Brand, p.OEMCode, p.Barcode}
+		for _, unit := range p.Units {
+			parts = append(parts, unit.Code, unit.Name, unit.Barcode)
+		}
+		hay := normalize(strings.Join(parts, " "))
 		if q == "" || strings.Contains(hay, q) {
 			out = append(out, p)
 			if len(out) == limit {
@@ -123,16 +131,70 @@ func (s *Store) SearchCatalog(q string, limit int) []Product {
 	return out
 }
 
-func priceForQuantity(p Product, qty float64) int64 {
-	price := p.SellingPrice
+func priceForBreaks(fallback int64, breaks []PriceBreak, qty float64) (int64, bool) {
+	price := fallback
 	bestMin := float64(-1)
-	for _, b := range p.PriceBreaks {
+	found := false
+	for _, b := range breaks {
 		if b.MinQty <= qty && b.MinQty >= 0 && b.MinQty > bestMin {
 			price = b.UnitPrice
 			bestMin = b.MinQty
+			found = true
 		}
 	}
+	return price, found
+}
+
+func priceForQuantity(p Product, qty float64) int64 {
+	price, _ := priceForBreaks(p.SellingPrice, p.PriceBreaks, qty)
 	return price
+}
+
+func baseUnit(p Product) ProductUnit {
+	for _, unit := range p.Units {
+		if unit.IsBase {
+			if unit.FactorToBase <= 0 {
+				unit.FactorToBase = 1
+			}
+			return unit
+		}
+	}
+	return ProductUnit{
+		Code:         "base",
+		Name:         "واحد",
+		FactorToBase: 1,
+		Barcode:      p.Barcode,
+		IsBase:       true,
+		PriceBreaks:  p.PriceBreaks,
+	}
+}
+
+func resolveUnit(p Product, unitID string) (ProductUnit, bool) {
+	unitID = strings.TrimSpace(unitID)
+	if unitID == "" {
+		return baseUnit(p), true
+	}
+	for _, unit := range p.Units {
+		if unit.ProductUnitID == unitID {
+			if unit.FactorToBase <= 0 {
+				return ProductUnit{}, false
+			}
+			return unit, true
+		}
+	}
+	return ProductUnit{}, false
+}
+
+func whole(v float64) bool {
+	return math.Abs(v-math.Round(v)) <= 1e-9
+}
+
+func derivedUnitPrice(basePrice int64, factor float64) (int64, error) {
+	v := float64(basePrice) * factor
+	if math.IsNaN(v) || math.IsInf(v, 0) || v < 0 || v > float64(math.MaxInt64) {
+		return 0, errors.New("offline unit price is invalid")
+	}
+	return int64(math.Round(v)), nil
 }
 
 func (s *Store) QueueSale(paymentMethod, customerID string, items []LocalSaleItem) (LocalSale, error) {
@@ -157,7 +219,23 @@ func (s *Store) QueueSale(paymentMethod, customerID string, items []LocalSaleIte
 		if !ok {
 			return LocalSale{}, fmt.Errorf("product %s is not in the local catalog", items[i].ProductID)
 		}
-		if items[i].Qty <= 0 || items[i].UnitPrice < 0 || s.state.Snapshot.Products[idx].Available+1e-9 < items[i].Qty {
+		product := s.state.Snapshot.Products[idx]
+		unit, ok := resolveUnit(product, items[i].ProductUnitID)
+		if !ok {
+			return LocalSale{}, fmt.Errorf("selected unit is not available for %s", product.Title)
+		}
+		if items[i].Qty <= 0 || items[i].UnitPrice < 0 {
+			return LocalSale{}, fmt.Errorf("offline sale quantity or price is invalid for %s", product.Title)
+		}
+		baseQty := items[i].Qty * unit.FactorToBase
+		if math.IsNaN(baseQty) || math.IsInf(baseQty, 0) || baseQty <= 0 {
+			return LocalSale{}, fmt.Errorf("unit conversion is invalid for %s", product.Title)
+		}
+		// Old persisted snapshots do not have Units. Preserve their former decimal behavior.
+		if len(product.Units) > 0 && !product.AllowFractionalBaseQty && (!whole(items[i].Qty) || !whole(baseQty)) {
+			return LocalSale{}, fmt.Errorf("fractional quantity is not allowed for %s", product.Title)
+		}
+		if product.Available+1e-9 < baseQty {
 			return LocalSale{}, fmt.Errorf("insufficient local stock for %s", s.state.Snapshot.Products[idx].Title)
 		}
 		manualAllowed := s.state.Snapshot.PricingPolicy == nil || s.state.Snapshot.PricingPolicy.CashierMayOverride
@@ -165,9 +243,25 @@ func (s *Store) QueueSale(paymentMethod, customerID string, items []LocalSaleIte
 			return LocalSale{}, errors.New("cashier price override is disabled")
 		}
 		if !items[i].ManualPrice && !items[i].PreservePrice {
-			items[i].UnitPrice = priceForQuantity(s.state.Snapshot.Products[idx], items[i].Qty)
+			if exact, found := priceForBreaks(0, unit.PriceBreaks, items[i].Qty); found {
+				items[i].UnitPrice = exact
+			} else if unit.IsBase {
+				items[i].UnitPrice = priceForQuantity(product, baseQty)
+			} else {
+				basePrice := priceForQuantity(product, baseQty)
+				derived, err := derivedUnitPrice(basePrice, unit.FactorToBase)
+				if err != nil {
+					return LocalSale{}, err
+				}
+				items[i].UnitPrice = derived
+			}
 		}
-		items[i].Title = s.state.Snapshot.Products[idx].Title
+		items[i].Title = product.Title
+		items[i].ProductUnitID = unit.ProductUnitID
+		items[i].UnitCode = unit.Code
+		items[i].UnitName = unit.Name
+		items[i].ConversionFactor = unit.FactorToBase
+		items[i].BaseQty = baseQty
 		line := int64(math.Round(items[i].Qty * float64(items[i].UnitPrice)))
 		if line < 0 || total > math.MaxInt64-line {
 			return LocalSale{}, errors.New("offline sale total is invalid")
@@ -176,8 +270,12 @@ func (s *Store) QueueSale(paymentMethod, customerID string, items []LocalSaleIte
 	}
 	for _, item := range items {
 		idx := byID[item.ProductID]
-		s.state.Snapshot.Products[idx].OnHand -= item.Qty
-		s.state.Snapshot.Products[idx].Available -= item.Qty
+		q := item.BaseQty
+		if q <= 0 {
+			q = item.Qty
+		}
+		s.state.Snapshot.Products[idx].OnHand -= q
+		s.state.Snapshot.Products[idx].Available -= q
 	}
 	s.state.Sequence++
 	now := time.Now()

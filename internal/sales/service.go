@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/example/autoparts-core/internal/pricing"
+	"github.com/example/autoparts-core/internal/productunit"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -81,16 +82,27 @@ func (s *Service) Create(ctx context.Context, cmd CreateSaleCommand) (Sale, erro
 		if item.ProductID == uuid.Nil || item.Qty <= 0 || item.UnitPrice < 0 {
 			return Sale{}, errors.New("invalid sale item")
 		}
+		unit, err := productunit.Resolve(ctx, tx, cmd.TenantID, item.ProductID, item.ProductUnitID)
+		if err != nil {
+			return Sale{}, fmt.Errorf("product unit: %w", err)
+		}
+		if !unit.AllowSale {
+			return Sale{}, fmt.Errorf("unit %s is not enabled for sale", unit.Name)
+		}
+		baseQty, err := productunit.BaseQty(item.Qty, unit)
+		if err != nil {
+			return Sale{}, fmt.Errorf("invalid quantity for %s: %w", unit.Name, err)
+		}
 		var onHand, reserved float64
 		var avgUnitCost int64
 		err = tx.QueryRow(ctx, `SELECT on_hand,reserved,avg_unit_cost FROM inventory_balances WHERE tenant_id=$1 AND warehouse_id=$2 AND product_id=$3 FOR UPDATE`, cmd.TenantID, cmd.WarehouseID, item.ProductID).Scan(&onHand, &reserved, &avgUnitCost)
 		if err != nil {
 			return Sale{}, fmt.Errorf("inventory lookup: %w", err)
 		}
-		if onHand-reserved < item.Qty {
-			return Sale{}, fmt.Errorf("insufficient stock for %s", item.ProductID)
+		if onHand-reserved+1e-9 < baseQty {
+			return Sale{}, fmt.Errorf("insufficient stock for %s: requested %.3f %s = %.3f base units", item.ProductID, item.Qty, unit.Name, baseQty)
 		}
-		suggested, appliedListID, source, configured, err := resolveSalePrice(ctx, tx, cmd, item.ProductID, item.Qty, selectedListID, defaultListID)
+		suggested, appliedListID, source, configured, err := resolveSalePrice(ctx, tx, cmd, item.ProductID, unit, item.Qty, baseQty, selectedListID, defaultListID)
 		if err != nil {
 			return Sale{}, err
 		}
@@ -108,10 +120,11 @@ func (s *Service) Create(ctx context.Context, cmd CreateSaleCommand) (Sale, erro
 		if (cmd.ActorRole == "cashier" || cmd.ActorRole == "edge") && priceOverride && !cashierMayOverride {
 			return Sale{}, errors.New("cashier price override is disabled")
 		}
-		minAllowed := pricing.MinimumPriceForMargin(avgUnitCost, minMarginBPS)
+		commercialCost := productunit.CommercialMoney(avgUnitCost, unit)
+		minAllowed := productunit.CommercialMoney(pricing.MinimumPriceForMargin(avgUnitCost, minMarginBPS), unit)
 		belowMarginGuard := item.UnitPrice < minAllowed
 		if belowMarginGuard && cmd.ActorRole != "owner" && cmd.ActorRole != "admin" {
-			return Sale{}, fmt.Errorf("price below minimum margin for product %s (minimum %d)", item.ProductID, minAllowed)
+			return Sale{}, fmt.Errorf("price below minimum margin for product %s (minimum %d per %s)", item.ProductID, minAllowed, unit.Name)
 		}
 		if belowMarginGuard && reason == "" && cmd.Source != "edge" {
 			return Sale{}, fmt.Errorf("margin override reason is required for product %s", item.ProductID)
@@ -134,7 +147,7 @@ func (s *Service) Create(ctx context.Context, cmd CreateSaleCommand) (Sale, erro
 		if grossLine < 0 || grossTotal > math.MaxInt64-grossLine || discount < 0 || discountTotal > math.MaxInt64-discount {
 			return Sale{}, errors.New("pricing totals overflow")
 		}
-		itemCOGS := int64(math.Round(item.Qty * float64(avgUnitCost)))
+		itemCOGS := int64(math.Round(baseQty * float64(avgUnitCost)))
 		if itemCOGS < 0 || cogsTotal > math.MaxInt64-itemCOGS {
 			return Sale{}, errors.New("cogs overflow")
 		}
@@ -148,9 +161,9 @@ func (s *Service) Create(ctx context.Context, cmd CreateSaleCommand) (Sale, erro
 			overrideActorUserID = &id
 		}
 		prepared = append(prepared, preparedSaleItem{
-			Input: item, AvgUnitCost: avgUnitCost, LineTotal: line, GrossLineTotal: grossLine, DiscountAmount: discount, COGS: itemCOGS,
+			Input: item, Unit: unit, BaseQty: baseQty, AvgUnitCost: avgUnitCost, LineTotal: line, GrossLineTotal: grossLine, DiscountAmount: discount, COGS: itemCOGS,
 			PriceListID: appliedListID, ListUnitPrice: listUnitPrice, PriceSource: source,
-			PriceOverride: priceOverride, OverrideReason: reason, OverrideActorUserID: overrideActorUserID, MarginBPS: pricing.MarginBPS(item.UnitPrice, avgUnitCost), MarginGuardBPS: minMarginBPS, BelowMarginGuard: belowMarginGuard,
+			PriceOverride: priceOverride, OverrideReason: reason, OverrideActorUserID: overrideActorUserID, MarginBPS: pricing.MarginBPS(item.UnitPrice, commercialCost), MarginGuardBPS: minMarginBPS, BelowMarginGuard: belowMarginGuard,
 		})
 	}
 
@@ -169,15 +182,15 @@ func (s *Service) Create(ctx context.Context, cmd CreateSaleCommand) (Sale, erro
 	}
 
 	for _, item := range prepared {
-		_, err = tx.Exec(ctx, `INSERT INTO sale_items(tenant_id,sale_id,product_id,qty,unit_price,unit_cost,line_total,gross_line_total,discount_amount,price_list_id,list_unit_price,price_source,price_override,override_reason,override_actor_user_id,margin_bps,margin_guard_bps,below_margin_guard) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,NULLIF($14,''),$15,$16,$17,$18)`, cmd.TenantID, saleID, item.Input.ProductID, item.Input.Qty, item.Input.UnitPrice, item.AvgUnitCost, item.LineTotal, item.GrossLineTotal, item.DiscountAmount, item.PriceListID, item.ListUnitPrice, item.PriceSource, item.PriceOverride, item.OverrideReason, item.OverrideActorUserID, item.MarginBPS, item.MarginGuardBPS, item.BelowMarginGuard)
+		_, err = tx.Exec(ctx, `INSERT INTO sale_items(tenant_id,sale_id,product_id,qty,product_unit_id,commercial_qty,commercial_unit_code,commercial_unit_name,conversion_factor,unit_price,unit_cost,line_total,gross_line_total,discount_amount,price_list_id,list_unit_price,price_source,price_override,override_reason,override_actor_user_id,margin_bps,margin_guard_bps,below_margin_guard) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,NULLIF($19,''),$20,$21,$22,$23)`, cmd.TenantID, saleID, item.Input.ProductID, item.BaseQty, item.Unit.ID, item.Input.Qty, item.Unit.Code, item.Unit.Name, item.Unit.FactorToBase, item.Input.UnitPrice, item.AvgUnitCost, item.LineTotal, item.GrossLineTotal, item.DiscountAmount, item.PriceListID, item.ListUnitPrice, item.PriceSource, item.PriceOverride, item.OverrideReason, item.OverrideActorUserID, item.MarginBPS, item.MarginGuardBPS, item.BelowMarginGuard)
 		if err != nil {
 			return Sale{}, err
 		}
-		_, err = tx.Exec(ctx, `UPDATE inventory_balances SET on_hand=on_hand-$4,updated_at=now() WHERE tenant_id=$1 AND warehouse_id=$2 AND product_id=$3`, cmd.TenantID, cmd.WarehouseID, item.Input.ProductID, item.Input.Qty)
+		_, err = tx.Exec(ctx, `UPDATE inventory_balances SET on_hand=on_hand-$4,updated_at=now() WHERE tenant_id=$1 AND warehouse_id=$2 AND product_id=$3`, cmd.TenantID, cmd.WarehouseID, item.Input.ProductID, item.BaseQty)
 		if err != nil {
 			return Sale{}, err
 		}
-		_, err = tx.Exec(ctx, `INSERT INTO inventory_movements(tenant_id,warehouse_id,product_id,movement_type,qty_delta,unit_cost,cost_delta,reference_type,reference_id) VALUES($1,$2,$3,'sale',$4,$5,$6,'sale',$7)`, cmd.TenantID, cmd.WarehouseID, item.Input.ProductID, -item.Input.Qty, item.AvgUnitCost, -item.COGS, saleID)
+		_, err = tx.Exec(ctx, `INSERT INTO inventory_movements(tenant_id,warehouse_id,product_id,movement_type,qty_delta,unit_cost,cost_delta,reference_type,reference_id) VALUES($1,$2,$3,'sale',$4,$5,$6,'sale',$7)`, cmd.TenantID, cmd.WarehouseID, item.Input.ProductID, -item.BaseQty, item.AvgUnitCost, -item.COGS, saleID)
 		if err != nil {
 			return Sale{}, err
 		}
@@ -235,6 +248,8 @@ func (s *Service) Create(ctx context.Context, cmd CreateSaleCommand) (Sale, erro
 
 type preparedSaleItem struct {
 	Input               CreateSaleItem
+	Unit                productunit.Unit
+	BaseQty             float64
 	AvgUnitCost         int64
 	LineTotal           int64
 	GrossLineTotal      int64
@@ -274,8 +289,8 @@ func salePricingContext(ctx context.Context, tx pgx.Tx, cmd CreateSaleCommand) (
 	return minMarginBPS, cashierMayOverride, defaultListID, selectedListID, nil
 }
 
-func resolveSalePrice(ctx context.Context, tx pgx.Tx, cmd CreateSaleCommand, productID uuid.UUID, qty float64, selectedListID, defaultListID uuid.UUID) (int64, *uuid.UUID, string, bool, error) {
-	price, found, err := saleBreakPrice(ctx, tx, cmd.TenantID, cmd.StoreID, productID, selectedListID, qty)
+func resolveSalePrice(ctx context.Context, tx pgx.Tx, cmd CreateSaleCommand, productID uuid.UUID, unit productunit.Unit, commercialQty, baseQty float64, selectedListID, defaultListID uuid.UUID) (int64, *uuid.UUID, string, bool, error) {
+	price, found, err := saleBreakPrice(ctx, tx, cmd.TenantID, cmd.StoreID, productID, selectedListID, unit.ID, commercialQty)
 	if err != nil {
 		return 0, nil, "", false, err
 	}
@@ -284,13 +299,38 @@ func resolveSalePrice(ctx context.Context, tx pgx.Tx, cmd CreateSaleCommand, pro
 		return price, &id, "price_list", true, nil
 	}
 	if selectedListID != defaultListID {
-		price, found, err = saleBreakPrice(ctx, tx, cmd.TenantID, cmd.StoreID, productID, defaultListID, qty)
+		price, found, err = saleBreakPrice(ctx, tx, cmd.TenantID, cmd.StoreID, productID, defaultListID, unit.ID, commercialQty)
 		if err != nil {
 			return 0, nil, "", false, err
 		}
 		if found {
 			id := defaultListID
 			return price, &id, "default_fallback", true, nil
+		}
+	}
+	// A package without a dedicated price inherits the base-unit tier at the equivalent base quantity.
+	if !unit.IsBase {
+		base, err := productunit.Resolve(ctx, tx, cmd.TenantID, productID, nil)
+		if err != nil {
+			return 0, nil, "", false, err
+		}
+		price, found, err = saleBreakPrice(ctx, tx, cmd.TenantID, cmd.StoreID, productID, selectedListID, base.ID, baseQty)
+		if err != nil {
+			return 0, nil, "", false, err
+		}
+		if found {
+			id := selectedListID
+			return productunit.CommercialMoney(price, unit), &id, "base_unit_derived", true, nil
+		}
+		if selectedListID != defaultListID {
+			price, found, err = saleBreakPrice(ctx, tx, cmd.TenantID, cmd.StoreID, productID, defaultListID, base.ID, baseQty)
+			if err != nil {
+				return 0, nil, "", false, err
+			}
+			if found {
+				id := defaultListID
+				return productunit.CommercialMoney(price, unit), &id, "base_unit_default_derived", true, nil
+			}
 		}
 	}
 	err = tx.QueryRow(ctx, `SELECT selling_price FROM store_product_offers WHERE tenant_id=$1 AND store_id=$2 AND warehouse_id=$3 AND product_id=$4 ORDER BY updated_at DESC LIMIT 1`, cmd.TenantID, cmd.StoreID, cmd.WarehouseID, productID).Scan(&price)
@@ -300,12 +340,12 @@ func resolveSalePrice(ctx context.Context, tx pgx.Tx, cmd CreateSaleCommand, pro
 	if err != nil {
 		return 0, nil, "", false, err
 	}
-	return price, nil, "legacy_offer_fallback", true, nil
+	return productunit.CommercialMoney(price, unit), nil, "legacy_offer_fallback", true, nil
 }
 
-func saleBreakPrice(ctx context.Context, tx pgx.Tx, tenantID, storeID, productID, listID uuid.UUID, qty float64) (int64, bool, error) {
+func saleBreakPrice(ctx context.Context, tx pgx.Tx, tenantID, storeID, productID, listID, unitID uuid.UUID, qty float64) (int64, bool, error) {
 	var price int64
-	err := tx.QueryRow(ctx, `SELECT unit_price FROM product_price_breaks WHERE tenant_id=$1 AND store_id=$2 AND product_id=$3 AND price_list_id=$4 AND min_qty<=$5 ORDER BY min_qty DESC LIMIT 1`, tenantID, storeID, productID, listID, qty).Scan(&price)
+	err := tx.QueryRow(ctx, `SELECT unit_price FROM product_price_breaks WHERE tenant_id=$1 AND store_id=$2 AND product_id=$3 AND price_list_id=$4 AND product_unit_id=$5 AND min_qty<=$6 ORDER BY min_qty DESC LIMIT 1`, tenantID, storeID, productID, listID, unitID, qty).Scan(&price)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return 0, false, nil
 	}
@@ -323,7 +363,7 @@ func (s *Service) Detail(ctx context.Context, tenantID, storeID, saleID uuid.UUI
 		return SaleDetail{}, err
 	}
 	out.CreatedAt = created.Format(time.RFC3339)
-	rows, err := s.db.Query(ctx, `SELECT si.id,si.product_id,p.title,si.qty,COALESCE(SUM(sri.qty),0),si.qty-COALESCE(SUM(sri.qty),0),si.unit_price,si.unit_cost,si.line_total,si.gross_line_total,si.discount_amount,si.price_list_id,si.list_unit_price,si.price_source,si.price_override,si.override_reason,si.override_actor_user_id,si.margin_bps,si.margin_guard_bps,si.below_margin_guard FROM sale_items si JOIN products p ON p.id=si.product_id LEFT JOIN sales_return_items sri ON sri.sale_item_id=si.id WHERE si.tenant_id=$1 AND si.sale_id=$2 GROUP BY si.id,p.title ORDER BY si.created_at`, tenantID, saleID)
+	rows, err := s.db.Query(ctx, `SELECT si.id,si.product_id,p.title,si.product_unit_id,COALESCE(si.commercial_unit_code,p.unit),COALESCE(si.commercial_unit_name,p.unit),si.conversion_factor::float8,COALESCE(si.commercial_qty,si.qty)::float8,si.qty::float8,COALESCE(SUM(sri.qty),0)::float8/NULLIF(si.conversion_factor,0),GREATEST(si.qty-COALESCE(SUM(sri.qty),0),0)::float8/NULLIF(si.conversion_factor,0),si.unit_price,si.unit_cost,si.line_total,si.gross_line_total,si.discount_amount,si.price_list_id,si.list_unit_price,si.price_source,si.price_override,si.override_reason,si.override_actor_user_id,si.margin_bps,si.margin_guard_bps,si.below_margin_guard FROM sale_items si JOIN products p ON p.id=si.product_id LEFT JOIN sales_return_items sri ON sri.sale_item_id=si.id WHERE si.tenant_id=$1 AND si.sale_id=$2 GROUP BY si.id,p.title,p.unit ORDER BY si.created_at`, tenantID, saleID)
 	if err != nil {
 		return SaleDetail{}, err
 	}
@@ -331,7 +371,7 @@ func (s *Service) Detail(ctx context.Context, tenantID, storeID, saleID uuid.UUI
 	out.Items = []SaleLine{}
 	for rows.Next() {
 		var x SaleLine
-		if err := rows.Scan(&x.ID, &x.ProductID, &x.Title, &x.Qty, &x.ReturnedQty, &x.ReturnableQty, &x.UnitPrice, &x.UnitCost, &x.LineTotal, &x.GrossLineTotal, &x.DiscountAmount, &x.PriceListID, &x.ListUnitPrice, &x.PriceSource, &x.PriceOverride, &x.OverrideReason, &x.OverrideActorUserID, &x.MarginBPS, &x.MarginGuardBPS, &x.BelowMarginGuard); err != nil {
+		if err := rows.Scan(&x.ID, &x.ProductID, &x.Title, &x.ProductUnitID, &x.UnitCode, &x.UnitName, &x.ConversionFactor, &x.Qty, &x.BaseQty, &x.ReturnedQty, &x.ReturnableQty, &x.UnitPrice, &x.UnitCost, &x.LineTotal, &x.GrossLineTotal, &x.DiscountAmount, &x.PriceListID, &x.ListUnitPrice, &x.PriceSource, &x.PriceOverride, &x.OverrideReason, &x.OverrideActorUserID, &x.MarginBPS, &x.MarginGuardBPS, &x.BelowMarginGuard); err != nil {
 			return SaleDetail{}, err
 		}
 		out.Items = append(out.Items, x)

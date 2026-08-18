@@ -12,9 +12,9 @@ The goal is not merely to reproduce Holoo accounting screens. The goal is to rem
 
 ## Current checkpoint
 
-- **Latest completed product checkpoint:** Phase 15.11 — Advanced Pricing & Trade Terms
-- **Next product phase:** **Phase 15.12 — Multi-Unit & Packaging**
-- Phase 15.12 should remain the next phase unless a verified blocker makes it impossible to implement safely.
+- **Latest completed product checkpoint:** Phase 15.12 — Multi-Unit & Packaging + Product Setup Wizard
+- **Next product phase:** **Phase 15.13 — Bank Reconciliation & Check Intelligence**
+- Phase 15.13 should remain the next phase unless a verified blocker makes it impossible to implement safely.
 - Build/dependency/release hardening tasks are important, but they do **not** replace this product roadmap. They should be handled as blocking fixes, maintenance slices, or release gates unless they materially change product capability.
 
 ---
@@ -41,7 +41,7 @@ We should not spend the roadmap trying to win only by copying a mature accountin
 
 ---
 
-## Competitive status after Phase 15.11
+## Competitive status after Phase 15.12
 
 | Area | Current status | Strategic position |
 |---|---|---|
@@ -68,7 +68,8 @@ We should not spend the roadmap trying to win only by copying a mature accountin
 | Checks UX and pagination | Implemented through 15.10 | Ready for larger real datasets |
 | Advanced multi-price rules | **Implemented in 15.11** | Migration blocker closed |
 | Wholesale/retail/mechanic pricing | **Implemented in 15.11** | Customer + quantity aware pricing |
-| Multi-unit / pack / carton handling | **Missing** | High-priority auto-parts requirement |
+| Multi-unit / pack / carton handling | **Implemented in 15.12** | Migration blocker closed; canonical base-stock model |
+| New-product barcode/package setup | **Implemented in 15.12** | Faster setup than fragmented legacy workflows |
 | Check maturity averaging (راس‌گیری) | **Missing** | Important professional finance gap |
 | Bank reconciliation | **Missing** | Important finance gap |
 | Tax/VAT and official invoicing | **Missing** | Major migration blocker |
@@ -196,7 +197,7 @@ This separation is strategically important because our network business model is
 
 ## Phase 15.12 — Multi-Unit & Packaging
 
-**Status:** NEXT
+**Status:** DONE
 
 ### Objective
 
@@ -215,6 +216,28 @@ Support how auto parts are actually purchased, stocked and sold: piece, pair, se
 - printable documents showing the commercial unit used;
 - import/export support for units and conversions;
 - validation preventing impossible/fractional conversions when product policy disallows them.
+
+### Delivered in Phase 15.12
+
+- canonical base-stock quantity per product plus commercial sale/purchase units;
+- piece, pair, set, pack, box, carton and tenant/product-defined unit codes/names;
+- alternate-unit conversion factors with integer/fractional-stock policy validation;
+- tenant-safe barcode per active packaging unit;
+- **New Product Wizard** that creates product + base unit + package units + barcodes + initial retail prices in one workflow;
+- USB barcode-scanner friendly inputs, manual barcode entry and internally generated EAN-13-style barcodes;
+- Store Edge label-print action directly after product/unit setup;
+- dedicated unit/barcode management page after product creation;
+- purchase in carton/pack while weighted-average inventory cost remains canonical per base unit;
+- sale in piece/pair/set/carton with commercial quantity and immutable conversion facts on sale lines;
+- sales and purchase returns preserve the original commercial unit while inventory movement remains base-unit correct;
+- package-specific price breaks, with deterministic fallback to base-unit price × conversion factor when a package has no dedicated price;
+- printable sale/purchase details show the commercial unit used on the document;
+- inventory screens explicitly display and adjust the base stock unit;
+- CSV import/export supports package code, name, conversion factor, barcode and sale/purchase permissions; imported products receive canonical base units;
+- existing products and existing Phase 15.11 prices are migrated to their canonical base unit without changing historical meaning;
+- Store Edge snapshot/search/offline queue is packaging-aware: alternate barcodes resolve locally, package sales reduce base inventory, package pricing works offline, and `product_unit_id` survives cloud sync;
+- pending offline package sales are replayed against fresh snapshots using base quantity, preventing double availability;
+- backward compatibility for pre-15.12 Store Edge snapshots/queued sales is preserved.
 
 ### Competitive outcome
 
@@ -438,8 +461,8 @@ Unless this document is intentionally revised, continue in this order:
 15.9.1  Checks UX Hotfix                         DONE
 15.10   Checks Pagination & Acceptance           DONE
 15.11   Advanced Pricing & Trade Terms            DONE
-15.12   Multi-Unit & Packaging                    NEXT
-15.13   Bank Reconciliation & Check Intelligence  PLANNED
+15.12   Multi-Unit & Packaging + Product Wizard   DONE
+15.13   Bank Reconciliation & Check Intelligence  NEXT
 15.14   Tax, VAT & Official Invoicing Foundation  PLANNED
 15.15   Iranian Modian Integration                PLANNED
 15.16   Invoice Designer & Store Documents        PLANNED

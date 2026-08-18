@@ -31,7 +31,7 @@ func TestPushSaleCarriesCustomerAndStripsLocalPricingFlags(t *testing.T) {
 		PaymentMethod:    "cash",
 		CustomerID:       "customer-123",
 		Items: []LocalSaleItem{{
-			ProductID: "p1", Title: "Brake", Qty: 6, UnitPrice: 85,
+			ProductID: "p1", ProductUnitID: "unit-carton", Title: "Brake", Qty: 6, UnitPrice: 85,
 			ManualPrice: true, PreservePrice: true,
 		}},
 	}
@@ -61,5 +61,11 @@ func TestPushSaleCarriesCustomerAndStripsLocalPricingFlags(t *testing.T) {
 	}
 	if got, _ := item["unit_price"].(float64); got != 85 {
 		t.Fatalf("unit_price=%v want 85", got)
+	}
+	if got, _ := item["product_unit_id"].(string); got != "unit-carton" {
+		t.Fatalf("product_unit_id=%q want unit-carton", got)
+	}
+	if _, exists := item["base_qty"]; exists {
+		t.Fatal("base_qty leaked into cloud sale API payload")
 	}
 }

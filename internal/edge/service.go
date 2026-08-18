@@ -127,13 +127,14 @@ func (s *Service) Snapshot(ctx context.Context, d Device) (Snapshot, error) {
 	rows, err := s.db.Query(ctx, `
 		SELECT p.id,p.title,COALESCE(p.sku,''),COALESCE(p.brand,''),COALESCE(p.oem_code,''),COALESCE(p.barcode,''),
 		       ib.on_hand::float8,ib.reserved::float8,(ib.on_hand-ib.reserved)::float8,
-		       COALESCE(local_price.unit_price,o.selling_price,0)::bigint,ib.updated_at
+		       COALESCE(local_price.unit_price,o.selling_price,0)::bigint,p.allow_fractional_base_qty,ib.updated_at
 		FROM products p
 		JOIN inventory_balances ib ON ib.tenant_id=p.tenant_id AND ib.product_id=p.id AND ib.warehouse_id=$3
 		LEFT JOIN LATERAL (
 		  SELECT ppb.unit_price
 		  FROM price_lists pl
-		  JOIN product_price_breaks ppb ON ppb.price_list_id=pl.id AND ppb.tenant_id=pl.tenant_id AND ppb.store_id=pl.store_id AND ppb.product_id=p.id
+		  JOIN product_units pu ON pu.tenant_id=p.tenant_id AND pu.product_id=p.id AND pu.is_base AND pu.active
+		  JOIN product_price_breaks ppb ON ppb.price_list_id=pl.id AND ppb.tenant_id=pl.tenant_id AND ppb.store_id=pl.store_id AND ppb.product_id=p.id AND ppb.product_unit_id=pu.id
 		  WHERE pl.tenant_id=p.tenant_id AND pl.store_id=$2 AND pl.is_default AND pl.active AND ppb.min_qty<=1
 		  ORDER BY ppb.min_qty DESC LIMIT 1
 		) local_price ON true
@@ -146,7 +147,7 @@ func (s *Service) Snapshot(ctx context.Context, d Device) (Snapshot, error) {
 	out.Products = make([]SnapshotProduct, 0)
 	for rows.Next() {
 		var p SnapshotProduct
-		if err := rows.Scan(&p.ProductID, &p.Title, &p.SKU, &p.Brand, &p.OEMCode, &p.Barcode, &p.OnHand, &p.Reserved, &p.Available, &p.SellingPrice, &p.UpdatedAt); err != nil {
+		if err := rows.Scan(&p.ProductID, &p.Title, &p.SKU, &p.Brand, &p.OEMCode, &p.Barcode, &p.OnHand, &p.Reserved, &p.Available, &p.SellingPrice, &p.AllowFractionalBaseQty, &p.UpdatedAt); err != nil {
 			rows.Close()
 			return Snapshot{}, err
 		}
@@ -158,30 +159,71 @@ func (s *Service) Snapshot(ctx context.Context, d Device) (Snapshot, error) {
 	}
 	rows.Close()
 
-	breakRows, err := s.db.Query(ctx, `
-		SELECT ppb.product_id,ppb.min_qty::float8,ppb.unit_price
-		FROM price_lists pl
-		JOIN product_price_breaks ppb ON ppb.price_list_id=pl.id AND ppb.tenant_id=pl.tenant_id AND ppb.store_id=pl.store_id
-		WHERE pl.tenant_id=$1 AND pl.store_id=$2 AND pl.is_default AND pl.active
-		ORDER BY ppb.product_id,ppb.min_qty`, d.TenantID, d.StoreID)
+	unitRows, err := s.db.Query(ctx, `
+		SELECT pu.product_id,pu.id,pu.code,pu.name,pu.factor_to_base::float8,
+		       COALESCE(pu.barcode,''),pu.is_base
+		FROM product_units pu
+		JOIN products p ON p.id=pu.product_id AND p.tenant_id=pu.tenant_id
+		WHERE pu.tenant_id=$1 AND p.deleted_at IS NULL AND p.active AND pu.active AND pu.allow_sale
+		ORDER BY pu.product_id,pu.is_base DESC,pu.factor_to_base,lower(pu.name),pu.id`, d.TenantID)
 	if err != nil {
 		return Snapshot{}, err
 	}
-	defer breakRows.Close()
-	byProduct := make(map[uuid.UUID][]SnapshotPriceBreak)
-	for breakRows.Next() {
+	unitsByProduct := make(map[uuid.UUID][]SnapshotProductUnit)
+	for unitRows.Next() {
 		var productID uuid.UUID
-		var b SnapshotPriceBreak
-		if err := breakRows.Scan(&productID, &b.MinQty, &b.UnitPrice); err != nil {
+		var unit SnapshotProductUnit
+		if err := unitRows.Scan(&productID, &unit.ProductUnitID, &unit.Code, &unit.Name, &unit.FactorToBase, &unit.Barcode, &unit.IsBase); err != nil {
+			unitRows.Close()
 			return Snapshot{}, err
 		}
-		byProduct[productID] = append(byProduct[productID], b)
+		unitsByProduct[productID] = append(unitsByProduct[productID], unit)
 	}
-	if err := breakRows.Err(); err != nil {
+	if err := unitRows.Err(); err != nil {
+		unitRows.Close()
 		return Snapshot{}, err
 	}
+	unitRows.Close()
+
+	type unitBreakKey struct {
+		ProductID uuid.UUID
+		UnitID    uuid.UUID
+	}
+	breakRows, err := s.db.Query(ctx, `
+		SELECT ppb.product_id,ppb.product_unit_id,ppb.min_qty::float8,ppb.unit_price
+		FROM price_lists pl
+		JOIN product_price_breaks ppb ON ppb.price_list_id=pl.id AND ppb.tenant_id=pl.tenant_id AND ppb.store_id=pl.store_id
+		JOIN product_units pu ON pu.id=ppb.product_unit_id AND pu.tenant_id=ppb.tenant_id AND pu.product_id=ppb.product_id AND pu.active AND pu.allow_sale
+		WHERE pl.tenant_id=$1 AND pl.store_id=$2 AND pl.is_default AND pl.active
+		ORDER BY ppb.product_id,ppb.product_unit_id,ppb.min_qty`, d.TenantID, d.StoreID)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	byUnit := make(map[unitBreakKey][]SnapshotPriceBreak)
+	for breakRows.Next() {
+		var productID, unitID uuid.UUID
+		var b SnapshotPriceBreak
+		if err := breakRows.Scan(&productID, &unitID, &b.MinQty, &b.UnitPrice); err != nil {
+			breakRows.Close()
+			return Snapshot{}, err
+		}
+		key := unitBreakKey{ProductID: productID, UnitID: unitID}
+		byUnit[key] = append(byUnit[key], b)
+	}
+	if err := breakRows.Err(); err != nil {
+		breakRows.Close()
+		return Snapshot{}, err
+	}
+	breakRows.Close()
 	for i := range out.Products {
-		out.Products[i].PriceBreaks = byProduct[out.Products[i].ProductID]
+		units := unitsByProduct[out.Products[i].ProductID]
+		for u := range units {
+			units[u].PriceBreaks = byUnit[unitBreakKey{ProductID: out.Products[i].ProductID, UnitID: units[u].ProductUnitID}]
+			if units[u].IsBase {
+				out.Products[i].PriceBreaks = units[u].PriceBreaks
+			}
+		}
+		out.Products[i].Units = units
 	}
 	return out, nil
 }

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/example/autoparts-core/internal/productunit"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -85,13 +86,18 @@ func (s *Service) Create(ctx context.Context, cmd CreateCommand) (Purchase, erro
 
 	for _, item := range cmd.Items {
 		line := int64(math.Round(item.Qty * float64(item.UnitCost)))
-		var productOK bool
-		if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM products WHERE id=$1 AND tenant_id=$2 AND deleted_at IS NULL AND active)`, item.ProductID, cmd.TenantID).Scan(&productOK); err != nil {
-			return Purchase{}, err
+		unit, e := productunit.Resolve(ctx, tx, cmd.TenantID, item.ProductID, item.ProductUnitID)
+		if e != nil {
+			return Purchase{}, fmt.Errorf("product unit: %w", e)
 		}
-		if !productOK {
-			return Purchase{}, fmt.Errorf("product %s is not available in tenant", item.ProductID)
+		if !unit.AllowPurchase {
+			return Purchase{}, fmt.Errorf("unit %s is not enabled for purchase", unit.Name)
 		}
+		baseQty, e := productunit.BaseQty(item.Qty, unit)
+		if e != nil {
+			return Purchase{}, fmt.Errorf("invalid quantity for %s: %w", unit.Name, e)
+		}
+		baseUnitCost := productunit.BaseMoney(item.UnitCost, unit)
 		var oldQty float64
 		var oldAvg int64
 		err = tx.QueryRow(ctx, `SELECT on_hand,avg_unit_cost FROM inventory_balances WHERE tenant_id=$1 AND warehouse_id=$2 AND product_id=$3 FOR UPDATE`, cmd.TenantID, cmd.WarehouseID, item.ProductID).Scan(&oldQty, &oldAvg)
@@ -104,15 +110,15 @@ func (s *Service) Create(ctx context.Context, cmd CreateCommand) (Purchase, erro
 		} else if err != nil {
 			return Purchase{}, err
 		}
-		newQty := oldQty + item.Qty
-		newAvg := weightedAverage(oldQty, oldAvg, item.Qty, item.UnitCost)
+		newQty := oldQty + baseQty
+		newAvg := weightedAverage(oldQty, oldAvg, baseQty, baseUnitCost)
 		if _, err = tx.Exec(ctx, `UPDATE inventory_balances SET on_hand=$4,avg_unit_cost=$5,updated_at=now() WHERE tenant_id=$1 AND warehouse_id=$2 AND product_id=$3`, cmd.TenantID, cmd.WarehouseID, item.ProductID, newQty, newAvg); err != nil {
 			return Purchase{}, err
 		}
-		if _, err = tx.Exec(ctx, `INSERT INTO purchase_items(tenant_id,purchase_id,product_id,qty,unit_cost,line_total) VALUES($1,$2,$3,$4,$5,$6)`, cmd.TenantID, purchaseID, item.ProductID, item.Qty, item.UnitCost, line); err != nil {
+		if _, err = tx.Exec(ctx, `INSERT INTO purchase_items(tenant_id,purchase_id,product_id,qty,product_unit_id,commercial_qty,commercial_unit_code,commercial_unit_name,conversion_factor,unit_cost,line_total) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`, cmd.TenantID, purchaseID, item.ProductID, baseQty, unit.ID, item.Qty, unit.Code, unit.Name, unit.FactorToBase, item.UnitCost, line); err != nil {
 			return Purchase{}, err
 		}
-		if _, err = tx.Exec(ctx, `INSERT INTO inventory_movements(tenant_id,warehouse_id,product_id,movement_type,qty_delta,unit_cost,cost_delta,reference_type,reference_id) VALUES($1,$2,$3,'purchase',$4,$5,$6,'purchase',$7)`, cmd.TenantID, cmd.WarehouseID, item.ProductID, item.Qty, item.UnitCost, line, purchaseID); err != nil {
+		if _, err = tx.Exec(ctx, `INSERT INTO inventory_movements(tenant_id,warehouse_id,product_id,movement_type,qty_delta,unit_cost,cost_delta,reference_type,reference_id) VALUES($1,$2,$3,'purchase',$4,$5,$6,'purchase',$7)`, cmd.TenantID, cmd.WarehouseID, item.ProductID, baseQty, baseUnitCost, line, purchaseID); err != nil {
 			return Purchase{}, err
 		}
 	}
@@ -169,7 +175,7 @@ func (s *Service) Detail(ctx context.Context, tenantID, storeID, purchaseID uuid
 		return PurchaseDetail{}, err
 	}
 	out.CreatedAt = created.Format(time.RFC3339)
-	rows, err := s.db.Query(ctx, `SELECT pi.id,pi.product_id,pr.title,pi.qty,COALESCE(SUM(pri.qty),0),pi.qty-COALESCE(SUM(pri.qty),0),pi.unit_cost,pi.line_total FROM purchase_items pi JOIN products pr ON pr.id=pi.product_id LEFT JOIN purchase_return_items pri ON pri.purchase_item_id=pi.id WHERE pi.tenant_id=$1 AND pi.purchase_id=$2 GROUP BY pi.id,pr.title ORDER BY pi.created_at`, tenantID, purchaseID)
+	rows, err := s.db.Query(ctx, `SELECT pi.id,pi.product_id,pr.title,pi.product_unit_id,COALESCE(pi.commercial_unit_code,pr.unit),COALESCE(pi.commercial_unit_name,pr.unit),pi.conversion_factor::float8,COALESCE(pi.commercial_qty,pi.qty)::float8,pi.qty::float8,COALESCE(SUM(pri.qty),0)::float8/NULLIF(pi.conversion_factor,0),GREATEST(pi.qty-COALESCE(SUM(pri.qty),0),0)::float8/NULLIF(pi.conversion_factor,0),pi.unit_cost,pi.line_total FROM purchase_items pi JOIN products pr ON pr.id=pi.product_id LEFT JOIN purchase_return_items pri ON pri.purchase_item_id=pi.id WHERE pi.tenant_id=$1 AND pi.purchase_id=$2 GROUP BY pi.id,pr.title,pr.unit ORDER BY pi.created_at`, tenantID, purchaseID)
 	if err != nil {
 		return PurchaseDetail{}, err
 	}
@@ -177,7 +183,7 @@ func (s *Service) Detail(ctx context.Context, tenantID, storeID, purchaseID uuid
 	out.Items = []PurchaseLine{}
 	for rows.Next() {
 		var x PurchaseLine
-		if err := rows.Scan(&x.ID, &x.ProductID, &x.Title, &x.Qty, &x.ReturnedQty, &x.ReturnableQty, &x.UnitCost, &x.LineTotal); err != nil {
+		if err := rows.Scan(&x.ID, &x.ProductID, &x.Title, &x.ProductUnitID, &x.UnitCode, &x.UnitName, &x.ConversionFactor, &x.Qty, &x.BaseQty, &x.ReturnedQty, &x.ReturnableQty, &x.UnitCost, &x.LineTotal); err != nil {
 			return PurchaseDetail{}, err
 		}
 		out.Items = append(out.Items, x)

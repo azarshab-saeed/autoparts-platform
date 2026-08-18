@@ -5,6 +5,8 @@ import type {
   InventoryStock,
   MeResponse,
   Product,
+  ProductUnit,
+  ProductUnitInput,
   PartyBalance,
   PaymentPart,
   PurchaseDetail,
@@ -32,6 +34,9 @@ let mockPriceLists: PriceList[] = [
   {id:"mock-wholesale",code:"wholesale",name:"عمده",is_default:false,active:true},
 ];
 let mockPricingSettings:PricingSettings={min_margin_bps:1000,cashier_may_override:true};
+const baseUnitFor=(p:Product):ProductUnit=>p.units?.find(u=>u.is_base)??{id:`mock-base-${p.id}`,code:p.unit||"pcs",name:p.unit==="pair"?"جفت":"عدد",factor_to_base:1,barcode:p.barcode,is_base:true,allow_sale:true,allow_purchase:true,active:true};
+const unitsFor=(p:Product):ProductUnit[]=>p.units?.length?p.units:[baseUnitFor(p)];
+const priceBreakKey=(productId:string,unitId?:string)=>unitId?`${productId}:${unitId}`:productId;
 if(mockCustomers[0]){mockCustomers[0].price_list_id="mock-mechanic";mockCustomers[0].price_list_name="مکانیک";}
 if(mockCustomers[1]){mockCustomers[1].price_list_id="mock-wholesale";mockCustomers[1].price_list_name="عمده";}
 const mockPriceBreaks:Record<string,Record<string,PriceBreak[]>>={};
@@ -40,7 +45,9 @@ for(const list of mockPriceLists){
   for(const p of mockProducts){
     const base=p.mockPrice||0;
     const multiplier=list.code==="mechanic"?.96:list.code==="wholesale"?.92:1;
-    mockPriceBreaks[list.id][p.id]=[{min_qty:1,unit_price:Math.round(base*multiplier)}];
+    const breaks=[{min_qty:1,unit_price:Math.round(base*multiplier)}];
+    mockPriceBreaks[list.id][p.id]=breaks.map(x=>({...x}));
+    mockPriceBreaks[list.id][priceBreakKey(p.id,baseUnitFor(p).id)]=breaks.map(x=>({...x}));
   }
 }
 
@@ -61,10 +68,43 @@ export async function getMe(token: string): Promise<MeResponse> {
 export async function searchProducts(q: string, session: UserSession): Promise<Product[]> {
   if (MOCK_MODE) {
     const s = q.trim().toLowerCase();
-    return mockProducts.filter(p => !s || [p.title, p.sku, p.brand, p.oem_code].filter(Boolean).some(v => String(v).toLowerCase().includes(s)));
+    return mockProducts.filter(p => !s || [p.title,p.sku,p.brand,p.oem_code,p.barcode,...unitsFor(p).map(u=>u.barcode)].filter(Boolean).some(v => String(v).toLowerCase().includes(s))).map(p=>({...p,units:unitsFor(p)}));
   }
   const out = await request<{items: Product[]}>(`/v1/products?q=${encodeURIComponent(q)}&limit=30`, {}, session.token);
   return out.items;
+}
+
+export async function createProduct(session:UserSession,input:{sku?:string;title:string;brand?:string;oem_code?:string;barcode?:string;unit:string;base_unit_name?:string;allow_fractional_base_qty:boolean;retail_price?:number;units:ProductUnitInput[]}):Promise<Product>{
+  if(MOCK_MODE){
+    const id=crypto.randomUUID();
+    const base:ProductUnit={id:crypto.randomUUID(),code:input.unit||"pcs",name:input.base_unit_name||"عدد",factor_to_base:1,barcode:input.barcode||undefined,is_base:true,allow_sale:true,allow_purchase:true,active:true};
+    const alternates=input.units.map(u=>({id:crypto.randomUUID(),code:u.code,name:u.name,factor_to_base:u.factor_to_base,barcode:u.barcode||undefined,is_base:false,allow_sale:u.allow_sale,allow_purchase:u.allow_purchase,active:true}));
+    const row:Product={id,sku:input.sku||undefined,title:input.title,brand:input.brand||undefined,oem_code:input.oem_code||undefined,barcode:input.barcode||undefined,unit:base.code,allow_fractional_base_qty:input.allow_fractional_base_qty,units:[base,...alternates],active:true,mockPrice:input.retail_price||0,mockQty:0,mockUnitCost:0};
+    mockProducts.push(row);
+    for(const list of mockPriceLists){mockPriceBreaks[list.id]??={};const mult=list.code==="mechanic"?.96:list.code==="wholesale"?.92:1;const basePrice=Math.round((input.retail_price||0)*mult);if(basePrice>0){mockPriceBreaks[list.id][priceBreakKey(id,base.id)]=[{min_qty:1,unit_price:basePrice}];mockPriceBreaks[list.id][id]=[{min_qty:1,unit_price:basePrice}];} input.units.forEach((u,i)=>{if((u.retail_price||0)>0)mockPriceBreaks[list.id][priceBreakKey(id,alternates[i].id)]=[{min_qty:1,unit_price:Math.round((u.retail_price||0)*mult)}]});}
+    return row;
+  }
+  return request<Product>("/v1/products",{method:"POST",body:JSON.stringify(input)},session.token);
+}
+
+export async function getProduct(session:UserSession,productId:string):Promise<Product>{
+  if(MOCK_MODE){const p=mockProducts.find(x=>x.id===productId);if(!p)throw new Error("کالا پیدا نشد");return{...p,units:unitsFor(p).map(x=>({...x}))};}
+  return request<Product>(`/v1/products/${productId}`,{},session.token);
+}
+
+export async function getProductUnits(session:UserSession,productId:string):Promise<ProductUnit[]>{
+  if(MOCK_MODE){const p=mockProducts.find(x=>x.id===productId);if(!p)throw new Error("کالا پیدا نشد");return unitsFor(p).map(x=>({...x}));}
+  const out=await request<{items:ProductUnit[]}>(`/v1/products/${productId}/units`,{},session.token);return out.items;
+}
+
+export async function updateProductUnits(session:UserSession,productId:string,input:{allow_fractional_base_qty:boolean;base_unit_name:string;base_barcode?:string;units:ProductUnitInput[]}):Promise<ProductUnit[]>{
+  if(MOCK_MODE){const p=mockProducts.find(x=>x.id===productId);if(!p)throw new Error("کالا پیدا نشد");const oldBase=baseUnitFor(p);const base={...oldBase,name:input.base_unit_name||oldBase.name,barcode:input.base_barcode||undefined};const alt=input.units.map(u=>{const old=p.units?.find(x=>!x.is_base&&x.code===u.code);return{id:old?.id||crypto.randomUUID(),code:u.code,name:u.name,factor_to_base:u.factor_to_base,barcode:u.barcode||undefined,is_base:false,allow_sale:u.allow_sale,allow_purchase:u.allow_purchase,active:true}});p.barcode=base.barcode;p.allow_fractional_base_qty=input.allow_fractional_base_qty;p.units=[base,...alt];return p.units.map(x=>({...x}));}
+  const out=await request<{items:ProductUnit[]}>(`/v1/products/${productId}/units`,{method:"PUT",body:JSON.stringify(input)},session.token);return out.items;
+}
+
+export async function exportProducts(session:UserSession):Promise<Product[]>{
+  if(MOCK_MODE)return mockProducts.map(p=>({...p,units:unitsFor(p).map(x=>({...x}))}));
+  const out=await request<{items:Product[]}>("/v1/products/export",{},session.token);return out.items;
 }
 
 export async function importProducts(session: UserSession, rows: ProductImportRow[]): Promise<ProductImportResult> {
@@ -110,19 +150,19 @@ export async function savePricingSettings(session:UserSession,input:PricingSetti
   if(MOCK_MODE){mockPricingSettings={...input};return{...mockPricingSettings};}return request<PricingSettings>("/v1/pricing/settings",{method:"PUT",body:JSON.stringify(input)},session.token);
 }
 export async function getProductPricing(session:UserSession,priceListId:string,q=""):Promise<ProductPricing[]>{
-  if(MOCK_MODE){const needle=q.trim().toLowerCase();return mockProducts.filter(p=>!needle||[p.title,p.sku,p.brand,p.oem_code].filter(Boolean).some(v=>String(v).toLowerCase().includes(needle))).slice(0,30).map(p=>({product_id:p.id,title:p.title,sku:p.sku,brand:p.brand,breaks:(mockPriceBreaks[priceListId]?.[p.id]||[]).map(x=>({...x}))}));}
+  if(MOCK_MODE){const needle=q.trim().toLowerCase();return mockProducts.filter(p=>!needle||[p.title,p.sku,p.brand,p.oem_code,p.barcode,...unitsFor(p).map(u=>u.barcode)].filter(Boolean).some(v=>String(v).toLowerCase().includes(needle))).slice(0,30).map(p=>{const units=unitsFor(p).filter(u=>u.active&&u.allow_sale).map(u=>({product_unit_id:u.id,code:u.code,name:u.name,factor_to_base:u.factor_to_base,is_base:u.is_base,breaks:(mockPriceBreaks[priceListId]?.[priceBreakKey(p.id,u.id)]||[]).map(x=>({...x}))}));return{product_id:p.id,title:p.title,sku:p.sku,brand:p.brand,breaks:units.find(u=>u.is_base)?.breaks||[],units};});}
   const out=await request<{items:ProductPricing[]}>(`/v1/pricing/products?price_list_id=${encodeURIComponent(priceListId)}&q=${encodeURIComponent(q)}&limit=30`,{},session.token);return out.items;
 }
-export async function replaceProductPriceBreaks(session:UserSession,priceListId:string,productId:string,breaks:PriceBreak[]):Promise<PriceBreak[]>{
-  if(MOCK_MODE){mockPriceBreaks[priceListId]??={};mockPriceBreaks[priceListId][productId]=breaks.map(x=>({...x})).sort((a,b)=>a.min_qty-b.min_qty);return mockPriceBreaks[priceListId][productId].map(x=>({...x}));}
-  const out=await request<{breaks:PriceBreak[]}>(`/v1/pricing/products/${productId}/breaks`,{method:"PUT",body:JSON.stringify({price_list_id:priceListId,breaks})},session.token);return out.breaks;
+export async function replaceProductPriceBreaks(session:UserSession,priceListId:string,productId:string,breaks:PriceBreak[],productUnitId?:string):Promise<PriceBreak[]>{
+  if(MOCK_MODE){mockPriceBreaks[priceListId]??={};const key=priceBreakKey(productId,productUnitId);mockPriceBreaks[priceListId][key]=breaks.map(x=>({...x})).sort((a,b)=>a.min_qty-b.min_qty);const p=mockProducts.find(x=>x.id===productId);if(p&&baseUnitFor(p).id===productUnitId)mockPriceBreaks[priceListId][productId]=mockPriceBreaks[priceListId][key].map(x=>({...x}));return mockPriceBreaks[priceListId][key].map(x=>({...x}));}
+  const out=await request<{breaks:PriceBreak[]}>(`/v1/pricing/products/${productId}/breaks`,{method:"PUT",body:JSON.stringify({price_list_id:priceListId,product_unit_id:productUnitId||null,breaks})},session.token);return out.breaks;
 }
 export async function assignCustomerPriceList(session:UserSession,customerId:string,priceListId:string|null):Promise<Customer>{
   if(MOCK_MODE){const c=mockCustomers.find(x=>x.id===customerId);if(!c)throw new Error("مشتری پیدا نشد");const pl=mockPriceLists.find(x=>x.id===priceListId);c.price_list_id=pl?.id;c.price_list_name=pl?.name;return{...c};}
   return request<Customer>(`/v1/customers/${customerId}/price-list`,{method:"PUT",body:JSON.stringify({price_list_id:priceListId})},session.token);
 }
-export async function quotePricing(session:UserSession,items:{product_id:string;qty:number}[],customerId?:string|null):Promise<PricingQuote>{
-  if(MOCK_MODE){const customer=customerId?mockCustomers.find(x=>x.id===customerId):undefined;const selected=mockPriceLists.find(x=>x.id===customer?.price_list_id&&x.active)||mockPriceLists.find(x=>x.is_default&&x.active)||mockPriceLists[0];const fallback=mockPriceLists.find(x=>x.is_default&&x.active)||selected;const rows=items.map(i=>{const p=mockProducts.find(x=>x.id===i.product_id);const selectedBreaks=mockPriceBreaks[selected.id]?.[i.product_id]||[];const selectedEligible=selectedBreaks.filter(b=>b.min_qty<=i.qty).sort((a,b)=>b.min_qty-a.min_qty)[0];const fallbackBreaks=selected.id===fallback.id?[]:(mockPriceBreaks[fallback.id]?.[i.product_id]||[]);const fallbackEligible=fallbackBreaks.filter(b=>b.min_qty<=i.qty).sort((a,b)=>b.min_qty-a.min_qty)[0];const price=selectedEligible?.unit_price??fallbackEligible?.unit_price??p?.mockPrice??0;const source=selectedEligible?"price_list":fallbackEligible?"default_fallback":"network_offer_fallback";const applied=selectedEligible?selected:fallbackEligible?fallback:undefined;const cost=p?.mockUnitCost||Math.round(price*.75);const min=Math.ceil(cost*10000/(10000-mockPricingSettings.min_margin_bps));return{product_id:i.product_id,qty:i.qty,price_list_id:applied?.id,price_list_name:applied?.name,unit_price:price,price_source:source,min_allowed_price:min};});return{price_list_id:selected.id,price_list_name:selected.name,min_margin_bps:mockPricingSettings.min_margin_bps,cashier_may_override:mockPricingSettings.cashier_may_override,items:rows};}
+export async function quotePricing(session:UserSession,items:{product_id:string;product_unit_id?:string;qty:number}[],customerId?:string|null):Promise<PricingQuote>{
+  if(MOCK_MODE){const customer=customerId?mockCustomers.find(x=>x.id===customerId):undefined;const selected=mockPriceLists.find(x=>x.id===customer?.price_list_id&&x.active)||mockPriceLists.find(x=>x.is_default&&x.active)||mockPriceLists[0];const fallback=mockPriceLists.find(x=>x.is_default&&x.active)||selected;const rows=items.map(i=>{const p=mockProducts.find(x=>x.id===i.product_id);const unit=p?(unitsFor(p).find(u=>u.id===i.product_unit_id)||baseUnitFor(p)):undefined;const factor=unit?.factor_to_base||1;const exact=(listId:string)=>mockPriceBreaks[listId]?.[priceBreakKey(i.product_id,unit?.id)]||[];const eligible=(bs:PriceBreak[],q:number)=>bs.filter(b=>b.min_qty<=q).sort((a,b)=>b.min_qty-a.min_qty)[0];let selectedEligible=eligible(exact(selected.id),i.qty);let fallbackEligible=selected.id===fallback.id?undefined:eligible(exact(fallback.id),i.qty);let derived=false;if(!selectedEligible&&!fallbackEligible&&unit&&!unit.is_base&&p){const base=baseUnitFor(p);selectedEligible=eligible(mockPriceBreaks[selected.id]?.[priceBreakKey(i.product_id,base.id)]||[],i.qty*factor);fallbackEligible=selected.id===fallback.id?undefined:eligible(mockPriceBreaks[fallback.id]?.[priceBreakKey(i.product_id,base.id)]||[],i.qty*factor);derived=Boolean(selectedEligible||fallbackEligible);}const raw=selectedEligible?.unit_price??fallbackEligible?.unit_price??p?.mockPrice??0;const packageFallback=!selectedEligible&&!fallbackEligible&&Boolean(unit&&!unit.is_base);const price=(derived||packageFallback)?Math.round(raw*factor):raw;const source=selectedEligible?(derived?"base_unit_derived":"price_list"):fallbackEligible?(derived?"base_unit_default_derived":"default_fallback"):"network_offer_fallback";const applied=selectedEligible?selected:fallbackEligible?fallback:undefined;const cost=(p?.mockUnitCost||Math.round((p?.mockPrice||price)*.75))*factor;const min=Math.ceil(cost*10000/(10000-mockPricingSettings.min_margin_bps));return{product_id:i.product_id,product_unit_id:unit?.id||"",unit_code:unit?.code||p?.unit||"pcs",unit_name:unit?.name||"عدد",factor_to_base:factor,qty:i.qty,price_list_id:applied?.id,price_list_name:applied?.name,unit_price:price,price_source:source,min_allowed_price:min};});return{price_list_id:selected.id,price_list_name:selected.name,min_margin_bps:mockPricingSettings.min_margin_bps,cashier_may_override:mockPricingSettings.cashier_may_override,items:rows};}
   return request<PricingQuote>("/v1/pricing/quote",{method:"POST",body:JSON.stringify({warehouse_id:session.warehouseId,customer_id:customerId||null,items})},session.token);
 }
 
@@ -153,7 +193,7 @@ export async function postSale(session: UserSession, items: SaleItem[], customer
       customer_id: customerId,
       payment_method: paymentMethod,
       ...(payments ? { payments } : {}),
-      items: items.map(i => ({ product_id: i.product.id, qty: i.qty, unit_price: i.unitPrice, ...(i.overrideReason ? { override_reason: i.overrideReason } : {}) }))
+      items: items.map(i => ({ product_id: i.product.id, product_unit_id: i.unit.id, qty: i.qty, unit_price: i.unitPrice, ...(i.overrideReason ? { override_reason: i.overrideReason } : {}) }))
     })
   }, session.token);
 }
@@ -225,7 +265,7 @@ export async function postPurchase(
 ): Promise<PurchaseResult> {
   if (MOCK_MODE) {
     await new Promise(r => setTimeout(r, 420));
-    applyMockPurchase(items.map(i => ({ productId: i.product.id, qty: i.qty, unitCost: i.unitCost })));
+    applyMockPurchase(items.map(i => ({ productId: i.product.id, qty: i.qty * i.unit.factor_to_base, unitCost: i.unit.factor_to_base > 0 ? i.unitCost / i.unit.factor_to_base : i.unitCost })));
     const total = items.reduce((s, i) => s + i.qty * i.unitCost, 0);
     const paid = payments ? payments.reduce((s,p)=>s+p.amount,0) : (paymentMethod === "credit" ? 0 : total);
     const due = Math.max(0,total-paid);
@@ -240,7 +280,7 @@ export async function postPurchase(
       supplier_id: supplierId,
       payment_method: paymentMethod,
       ...(payments ? { payments } : {}),
-      items: items.map(i => ({ product_id: i.product.id, qty: i.qty, unit_cost: i.unitCost }))
+      items: items.map(i => ({ product_id: i.product.id, product_unit_id: i.unit.id, qty: i.qty, unit_cost: i.unitCost }))
     })
   }, session.token);
 }

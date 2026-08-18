@@ -21,6 +21,28 @@ export type MeResponse = {
   default_warehouse_id?: string;
 };
 
+export type ProductUnit = {
+  id: string;
+  code: string;
+  name: string;
+  factor_to_base: number;
+  barcode?: string;
+  is_base: boolean;
+  allow_sale: boolean;
+  allow_purchase: boolean;
+  active: boolean;
+};
+
+export type ProductUnitInput = {
+  code: string;
+  name: string;
+  factor_to_base: number;
+  barcode?: string;
+  allow_sale: boolean;
+  allow_purchase: boolean;
+  retail_price?: number;
+};
+
 export type Product = {
   id: string;
   sku?: string;
@@ -29,6 +51,8 @@ export type Product = {
   oem_code?: string;
   barcode?: string;
   unit: string;
+  allow_fractional_base_qty?: boolean;
+  units?: ProductUnit[];
   active: boolean;
   mockPrice?: number;
   mockQty?: number;
@@ -43,6 +67,8 @@ export type ProductImportRow = {
   oem_code?: string;
   barcode?: string;
   unit?: string;
+  allow_fractional_base_qty?: boolean;
+  units?: ProductUnitInput[];
   on_hand: number;
   avg_unit_cost: number;
   selling_price: number;
@@ -70,6 +96,8 @@ export type InventoryStock = {
   product_id: string;
   title: string;
   sku?: string;
+  base_unit_code?: string;
+  base_unit_name?: string;
   on_hand: number;
   reserved: number;
   available: number;
@@ -80,11 +108,11 @@ export type InventoryStock = {
 };
 
 export type SaleItem = {
-  product: Product; qty: number; unitPrice: number;
+  product: Product; unit: ProductUnit; qty: number; unitPrice: number;
   suggestedPrice?: number; minAllowedPrice?: number; priceListId?: string; priceListName?: string; priceSource?: string;
   manualPrice?: boolean; overrideReason?: string; lineDiscountAmount?: number;
 };
-export type PurchaseItem = { product: Product; qty: number; unitCost: number };
+export type PurchaseItem = { product: Product; unit: ProductUnit; qty: number; unitCost: number };
 
 export type PurchaseResult = {
   id: string;
@@ -103,8 +131,9 @@ export type InventoryAdjustmentResult = {
 export type PriceList = { id:string; code:string; name:string; is_default:boolean; active:boolean };
 export type PricingSettings = { min_margin_bps:number; cashier_may_override:boolean };
 export type PriceBreak = { min_qty:number; unit_price:number };
-export type ProductPricing = { product_id:string; title:string; sku?:string; brand?:string; breaks:PriceBreak[] };
-export type PricingQuoteLine = { product_id:string; qty:number; price_list_id?:string; price_list_name?:string; unit_price:number; price_source:string; min_allowed_price:number };
+export type ProductUnitPricing = { product_unit_id:string; code:string; name:string; factor_to_base:number; is_base:boolean; breaks:PriceBreak[] };
+export type ProductPricing = { product_id:string; title:string; sku?:string; brand?:string; breaks:PriceBreak[]; units:ProductUnitPricing[] };
+export type PricingQuoteLine = { product_id:string; product_unit_id:string; unit_code:string; unit_name:string; factor_to_base:number; qty:number; price_list_id?:string; price_list_name?:string; unit_price:number; price_source:string; min_allowed_price:number };
 export type PricingQuote = { price_list_id:string; price_list_name:string; min_margin_bps:number; cashier_may_override:boolean; items:PricingQuoteLine[] };
 
 export type PaymentPart = { method: "cash"|"card"; amount: number };
@@ -133,6 +162,11 @@ export type ReturnableLine = {
   id: string;
   product_id: string;
   title: string;
+  product_unit_id?: string;
+  unit_code?: string;
+  unit_name?: string;
+  conversion_factor?: number;
+  base_qty?: number;
   qty: number;
   returned_qty: number;
   returnable_qty: number;

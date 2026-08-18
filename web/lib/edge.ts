@@ -47,7 +47,7 @@ export async function getStoreEdgeStatus():Promise<StoreEdgeStatus>{
 export async function queueOfflineSale(items:SaleItem[],paymentMethod:"cash"|"card",customerId?:string|null):Promise<StoreEdgeLocalSale>{
   return localRequest<StoreEdgeLocalSale>("/v1/offline-sales",{
     method:"POST",
-    body:JSON.stringify({payment_method:paymentMethod,customer_id:customerId||undefined,items:items.map(x=>({product_id:x.product.id,title:x.product.title,qty:x.qty,unit_price:x.unitPrice,manual_price:Boolean(x.manualPrice),preserve_price:true}))})
+    body:JSON.stringify({payment_method:paymentMethod,customer_id:customerId||undefined,items:items.map(x=>({product_id:x.product.id,product_unit_id:x.unit.id,title:x.product.title,qty:x.qty,unit_price:x.unitPrice,manual_price:Boolean(x.manualPrice),preserve_price:true}))})
   },2500);
 }
 

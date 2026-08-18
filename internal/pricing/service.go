@@ -7,6 +7,7 @@ import (
 	"math"
 	"strings"
 
+	"github.com/example/autoparts-core/internal/productunit"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -41,21 +42,36 @@ type Settings struct {
 	CashierMayOverride bool `json:"cashier_may_override"`
 }
 
+type ProductUnitPricing struct {
+	ProductUnitID uuid.UUID `json:"product_unit_id"`
+	Code          string    `json:"code"`
+	Name          string    `json:"name"`
+	FactorToBase  float64   `json:"factor_to_base"`
+	IsBase        bool      `json:"is_base"`
+	Breaks        []Break   `json:"breaks"`
+}
+
 type ProductPricing struct {
-	ProductID uuid.UUID `json:"product_id"`
-	Title     string    `json:"title"`
-	SKU       *string   `json:"sku,omitempty"`
-	Brand     *string   `json:"brand,omitempty"`
-	Breaks    []Break   `json:"breaks"`
+	ProductID uuid.UUID            `json:"product_id"`
+	Title     string               `json:"title"`
+	SKU       *string              `json:"sku,omitempty"`
+	Brand     *string              `json:"brand,omitempty"`
+	Breaks    []Break              `json:"breaks"` // base-unit compatibility
+	Units     []ProductUnitPricing `json:"units"`
 }
 
 type QuoteRequestLine struct {
-	ProductID uuid.UUID `json:"product_id"`
-	Qty       float64   `json:"qty"`
+	ProductID     uuid.UUID  `json:"product_id"`
+	ProductUnitID *uuid.UUID `json:"product_unit_id,omitempty"`
+	Qty           float64    `json:"qty"`
 }
 
 type QuoteLine struct {
 	ProductID       uuid.UUID  `json:"product_id"`
+	ProductUnitID   uuid.UUID  `json:"product_unit_id"`
+	UnitCode        string     `json:"unit_code"`
+	UnitName        string     `json:"unit_name"`
+	FactorToBase    float64    `json:"factor_to_base"`
 	Qty             float64    `json:"qty"`
 	PriceListID     *uuid.UUID `json:"price_list_id,omitempty"`
 	PriceListName   string     `json:"price_list_name,omitempty"`
@@ -214,7 +230,7 @@ func (s *Service) ListProductPricing(ctx context.Context, tenantID, storeID, pri
 		return nil, errors.New("price list not found")
 	}
 	pat := "%" + strings.ToLower(strings.TrimSpace(q)) + "%"
-	rows, err := s.db.Query(ctx, `SELECT id,title,sku,brand FROM products WHERE tenant_id=$1 AND deleted_at IS NULL AND active AND ($2='%%' OR lower(title) LIKE $2 OR lower(COALESCE(sku,'')) LIKE $2 OR lower(COALESCE(brand,'')) LIKE $2 OR lower(COALESCE(oem_code,'')) LIKE $2 OR lower(COALESCE(barcode,'')) LIKE $2) ORDER BY lower(title),id LIMIT $3`, tenantID, pat, limit)
+	rows, err := s.db.Query(ctx, `SELECT id,title,sku,brand FROM products WHERE tenant_id=$1 AND deleted_at IS NULL AND active AND ($2='%%' OR lower(title) LIKE $2 OR lower(COALESCE(sku,'')) LIKE $2 OR lower(COALESCE(brand,'')) LIKE $2 OR lower(COALESCE(oem_code,'')) LIKE $2 OR lower(COALESCE(barcode,'')) LIKE $2 OR EXISTS(SELECT 1 FROM product_units pu WHERE pu.tenant_id=products.tenant_id AND pu.product_id=products.id AND pu.active AND lower(COALESCE(pu.barcode,'')) LIKE $2)) ORDER BY lower(title),id LIMIT $3`, tenantID, pat, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -225,18 +241,46 @@ func (s *Service) ListProductPricing(ctx context.Context, tenantID, storeID, pri
 		if err := rows.Scan(&x.ProductID, &x.Title, &x.SKU, &x.Brand); err != nil {
 			return nil, err
 		}
-		br, err := s.breaks(ctx, tenantID, storeID, x.ProductID, priceListID)
+		units, err := s.unitPricing(ctx, tenantID, storeID, x.ProductID, priceListID)
 		if err != nil {
 			return nil, err
 		}
-		x.Breaks = br
+		x.Units = units
+		for _, u := range units {
+			if u.IsBase {
+				x.Breaks = u.Breaks
+				break
+			}
+		}
 		out = append(out, x)
 	}
 	return out, rows.Err()
 }
 
-func (s *Service) breaks(ctx context.Context, tenantID, storeID, productID, priceListID uuid.UUID) ([]Break, error) {
-	rows, err := s.db.Query(ctx, `SELECT min_qty::float8,unit_price FROM product_price_breaks WHERE tenant_id=$1 AND store_id=$2 AND product_id=$3 AND price_list_id=$4 ORDER BY min_qty`, tenantID, storeID, productID, priceListID)
+func (s *Service) unitPricing(ctx context.Context, tenantID, storeID, productID, priceListID uuid.UUID) ([]ProductUnitPricing, error) {
+	rows, err := s.db.Query(ctx, `SELECT id,code,name,factor_to_base::float8,is_base FROM product_units WHERE tenant_id=$1 AND product_id=$2 AND active AND allow_sale ORDER BY is_base DESC,factor_to_base,name`, tenantID, productID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []ProductUnitPricing{}
+	for rows.Next() {
+		var u ProductUnitPricing
+		if err := rows.Scan(&u.ProductUnitID, &u.Code, &u.Name, &u.FactorToBase, &u.IsBase); err != nil {
+			return nil, err
+		}
+		br, err := s.breaks(ctx, tenantID, storeID, productID, priceListID, u.ProductUnitID)
+		if err != nil {
+			return nil, err
+		}
+		u.Breaks = br
+		out = append(out, u)
+	}
+	return out, rows.Err()
+}
+
+func (s *Service) breaks(ctx context.Context, tenantID, storeID, productID, priceListID, unitID uuid.UUID) ([]Break, error) {
+	rows, err := s.db.Query(ctx, `SELECT min_qty::float8,unit_price FROM product_price_breaks WHERE tenant_id=$1 AND store_id=$2 AND product_id=$3 AND price_list_id=$4 AND product_unit_id=$5 ORDER BY min_qty`, tenantID, storeID, productID, priceListID, unitID)
 	if err != nil {
 		return nil, err
 	}
@@ -252,7 +296,7 @@ func (s *Service) breaks(ctx context.Context, tenantID, storeID, productID, pric
 	return out, rows.Err()
 }
 
-func (s *Service) ReplaceProductBreaks(ctx context.Context, tenantID, storeID, productID, priceListID uuid.UUID, in []Break) ([]Break, error) {
+func (s *Service) ReplaceProductBreaks(ctx context.Context, tenantID, storeID, productID, priceListID uuid.UUID, productUnitID *uuid.UUID, in []Break) ([]Break, error) {
 	if len(in) > 30 {
 		return nil, errors.New("too many quantity breaks")
 	}
@@ -276,28 +320,39 @@ func (s *Service) ReplaceProductBreaks(ctx context.Context, tenantID, storeID, p
 		return nil, err
 	}
 	defer tx.Rollback(ctx)
-	var listOK, productOK bool
+	var listOK bool
 	if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM price_lists WHERE id=$1 AND tenant_id=$2 AND store_id=$3 AND active)`, priceListID, tenantID, storeID).Scan(&listOK); err != nil {
 		return nil, err
 	}
-	if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM products WHERE id=$1 AND tenant_id=$2 AND active AND deleted_at IS NULL)`, productID, tenantID).Scan(&productOK); err != nil {
+	if !listOK {
+		return nil, errors.New("price list not found")
+	}
+	unit, err := productunit.Resolve(ctx, tx, tenantID, productID, productUnitID)
+	if err != nil {
 		return nil, err
 	}
-	if !listOK || !productOK {
-		return nil, errors.New("price list or product not found")
+	if !unit.AllowSale {
+		return nil, errors.New("selected product unit is not enabled for sale")
 	}
-	if _, err = tx.Exec(ctx, `DELETE FROM product_price_breaks WHERE tenant_id=$1 AND store_id=$2 AND product_id=$3 AND price_list_id=$4`, tenantID, storeID, productID, priceListID); err != nil {
+	if !unit.AllowFractionalBaseQty {
+		for _, b := range in {
+			if math.Abs(b.MinQty-math.Round(b.MinQty)) > 1e-9 {
+				return nil, errors.New("quantity breaks must use whole commercial units for this product")
+			}
+		}
+	}
+	if _, err = tx.Exec(ctx, `DELETE FROM product_price_breaks WHERE tenant_id=$1 AND store_id=$2 AND product_id=$3 AND price_list_id=$4 AND product_unit_id=$5`, tenantID, storeID, productID, priceListID, unit.ID); err != nil {
 		return nil, err
 	}
 	for _, b := range in {
-		if _, err = tx.Exec(ctx, `INSERT INTO product_price_breaks(tenant_id,store_id,product_id,price_list_id,min_qty,unit_price) VALUES($1,$2,$3,$4,$5,$6)`, tenantID, storeID, productID, priceListID, b.MinQty, b.UnitPrice); err != nil {
+		if _, err = tx.Exec(ctx, `INSERT INTO product_price_breaks(tenant_id,store_id,product_id,price_list_id,product_unit_id,min_qty,unit_price) VALUES($1,$2,$3,$4,$5,$6,$7)`, tenantID, storeID, productID, priceListID, unit.ID, b.MinQty, b.UnitPrice); err != nil {
 			return nil, err
 		}
 	}
 	if err = tx.Commit(ctx); err != nil {
 		return nil, err
 	}
-	return s.breaks(ctx, tenantID, storeID, productID, priceListID)
+	return s.breaks(ctx, tenantID, storeID, productID, priceListID, unit.ID)
 }
 
 func (s *Service) Quote(ctx context.Context, tenantID, storeID, warehouseID uuid.UUID, customerID *uuid.UUID, lines []QuoteRequestLine) (QuoteResult, error) {
@@ -352,32 +407,59 @@ func (s *Service) Quote(ctx context.Context, tenantID, storeID, warehouseID uuid
 }
 
 func (s *Service) quoteLine(ctx context.Context, tenantID, storeID, warehouseID uuid.UUID, selected, fallback PriceList, settings Settings, line QuoteRequestLine) (QuoteLine, error) {
-	var exists bool
-	if err := s.db.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM products WHERE id=$1 AND tenant_id=$2 AND active AND deleted_at IS NULL)`, line.ProductID, tenantID).Scan(&exists); err != nil {
+	unit, err := productunit.Resolve(ctx, s.db, tenantID, line.ProductID, line.ProductUnitID)
+	if err != nil {
 		return QuoteLine{}, err
 	}
-	if !exists {
-		return QuoteLine{}, fmt.Errorf("product %s not found", line.ProductID)
+	if !unit.AllowSale {
+		return QuoteLine{}, errors.New("selected unit is not enabled for sale")
+	}
+	baseQty, err := productunit.BaseQty(line.Qty, unit)
+	if err != nil {
+		return QuoteLine{}, err
 	}
 	var cost int64
-	err := s.db.QueryRow(ctx, `SELECT avg_unit_cost FROM inventory_balances WHERE tenant_id=$1 AND warehouse_id=$2 AND product_id=$3`, tenantID, warehouseID, line.ProductID).Scan(&cost)
+	err = s.db.QueryRow(ctx, `SELECT avg_unit_cost FROM inventory_balances WHERE tenant_id=$1 AND warehouse_id=$2 AND product_id=$3`, tenantID, warehouseID, line.ProductID).Scan(&cost)
 	if errors.Is(err, pgx.ErrNoRows) {
 		cost = 0
 	} else if err != nil {
 		return QuoteLine{}, err
 	}
-
-	price, list, source, found, err := s.resolveBreak(ctx, tenantID, storeID, line.ProductID, selected, line.Qty)
+	price, list, source, found, err := s.resolveBreak(ctx, tenantID, storeID, line.ProductID, unit.ID, selected, line.Qty)
 	if err != nil {
 		return QuoteLine{}, err
 	}
 	if !found && fallback.ID != selected.ID {
-		price, list, source, found, err = s.resolveBreak(ctx, tenantID, storeID, line.ProductID, fallback, line.Qty)
+		price, list, source, found, err = s.resolveBreak(ctx, tenantID, storeID, line.ProductID, unit.ID, fallback, line.Qty)
 		if err != nil {
 			return QuoteLine{}, err
 		}
 		if found {
 			source = "default_fallback"
+		}
+	}
+	if !found && !unit.IsBase {
+		base, err := productunit.Resolve(ctx, s.db, tenantID, line.ProductID, nil)
+		if err != nil {
+			return QuoteLine{}, err
+		}
+		price, list, source, found, err = s.resolveBreak(ctx, tenantID, storeID, line.ProductID, base.ID, selected, baseQty)
+		if err != nil {
+			return QuoteLine{}, err
+		}
+		if found {
+			price = productunit.CommercialMoney(price, unit)
+			source = "base_unit_derived"
+		}
+		if !found && fallback.ID != selected.ID {
+			price, list, source, found, err = s.resolveBreak(ctx, tenantID, storeID, line.ProductID, base.ID, fallback, baseQty)
+			if err != nil {
+				return QuoteLine{}, err
+			}
+			if found {
+				price = productunit.CommercialMoney(price, unit)
+				source = "base_unit_default_derived"
+			}
 		}
 	}
 	if !found {
@@ -387,12 +469,13 @@ func (s *Service) quoteLine(ctx context.Context, tenantID, storeID, warehouseID 
 		} else if err != nil {
 			return QuoteLine{}, err
 		} else {
+			price = productunit.CommercialMoney(price, unit)
 			source = "network_offer_fallback"
 		}
 		list = PriceList{}
 	}
-	minPrice := MinimumPriceForMargin(cost, settings.MinMarginBPS)
-	q := QuoteLine{ProductID: line.ProductID, Qty: line.Qty, UnitPrice: price, PriceSource: source, MinAllowedPrice: minPrice}
+	minPrice := productunit.CommercialMoney(MinimumPriceForMargin(cost, settings.MinMarginBPS), unit)
+	q := QuoteLine{ProductID: line.ProductID, ProductUnitID: unit.ID, UnitCode: unit.Code, UnitName: unit.Name, FactorToBase: unit.FactorToBase, Qty: line.Qty, UnitPrice: price, PriceSource: source, MinAllowedPrice: minPrice}
 	if list.ID != uuid.Nil {
 		q.PriceListID = &list.ID
 		q.PriceListName = list.Name
@@ -400,9 +483,9 @@ func (s *Service) quoteLine(ctx context.Context, tenantID, storeID, warehouseID 
 	return q, nil
 }
 
-func (s *Service) resolveBreak(ctx context.Context, tenantID, storeID, productID uuid.UUID, list PriceList, qty float64) (int64, PriceList, string, bool, error) {
+func (s *Service) resolveBreak(ctx context.Context, tenantID, storeID, productID, unitID uuid.UUID, list PriceList, qty float64) (int64, PriceList, string, bool, error) {
 	var price int64
-	err := s.db.QueryRow(ctx, `SELECT unit_price FROM product_price_breaks WHERE tenant_id=$1 AND store_id=$2 AND product_id=$3 AND price_list_id=$4 AND min_qty<=$5 ORDER BY min_qty DESC LIMIT 1`, tenantID, storeID, productID, list.ID, qty).Scan(&price)
+	err := s.db.QueryRow(ctx, `SELECT unit_price FROM product_price_breaks WHERE tenant_id=$1 AND store_id=$2 AND product_id=$3 AND price_list_id=$4 AND product_unit_id=$5 AND min_qty<=$6 ORDER BY min_qty DESC LIMIT 1`, tenantID, storeID, productID, list.ID, unitID, qty).Scan(&price)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return 0, PriceList{}, "", false, nil
 	}

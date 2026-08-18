@@ -36,12 +36,16 @@ func (c *Cloud) PushSale(ctx context.Context, cfg Config, sale LocalSale) (Cloud
 	var out CloudSaleResponse
 	items := make([]map[string]any, 0, len(sale.Items))
 	for _, item := range sale.Items {
-		items = append(items, map[string]any{
+		out := map[string]any{
 			"product_id": item.ProductID,
 			"title":      item.Title,
 			"qty":        item.Qty,
 			"unit_price": item.UnitPrice,
-		})
+		}
+		if strings.TrimSpace(item.ProductUnitID) != "" {
+			out["product_unit_id"] = item.ProductUnitID
+		}
+		items = append(items, out)
 	}
 	body := map[string]any{
 		"local_operation_id": sale.LocalOperationID,

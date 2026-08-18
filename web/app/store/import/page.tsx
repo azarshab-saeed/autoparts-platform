@@ -1,9 +1,9 @@
 "use client";
 
 import { ChangeEvent, useMemo, useState } from "react";
-import { importProducts } from "@/lib/api";
+import { exportProducts, importProducts } from "@/lib/api";
 import { useAuth } from "@/components/auth-provider";
-import type { ProductImportResult, ProductImportRow } from "@/lib/types";
+import type { Product, ProductImportResult, ProductImportRow, ProductUnitInput } from "@/lib/types";
 
 const money=(v:number)=>new Intl.NumberFormat("fa-IR").format(v)+" تومان";
 const number=(v:number)=>new Intl.NumberFormat("fa-IR",{maximumFractionDigits:2}).format(v);
@@ -21,6 +21,8 @@ const aliases:Record<string,string[]>={
   oem_code:["oem","کد oem","oem code","oem_code"],
   barcode:["بارکد","barcode"],
   unit:["واحد","unit"],
+  fractional:["موجودی اعشاری","اعشاری","fractional","allow fractional","allow_fractional_base_qty"],
+  packages:["بسته بندی","بسته‌بندی","واحدهای جایگزین","بسته ها","بسته‌ها","packages","units","alternate units"],
   on_hand:["موجودی","تعداد موجودی","on hand","on_hand","qty","quantity"],
   avg_unit_cost:["قیمت خرید","بهای خرید","میانگین خرید","avg unit cost","avg_unit_cost","cost"],
   selling_price:["قیمت فروش","selling price","selling_price","price"],
@@ -58,6 +60,18 @@ function mapHeaders(headers:string[]){
   return out;
 }
 
+function parsePackages(raw:string,rowNo:number,errors:string[]):ProductUnitInput[]{
+  if(!raw.trim())return[];
+  const out:ProductUnitInput[]=[];
+  for(const token of raw.split(";").map(x=>x.trim()).filter(Boolean)){
+    const [code0,name0,factor0,barcode0,sale0,purchase0,price0]=token.split("|").map(x=>x.trim());
+    const factor=numeric(factor0||"");const price=numeric(price0||"");
+    if(!code0||!name0||!Number.isFinite(factor)||factor<=0){errors.push(`ردیف ${rowNo}: بسته‌بندی «${token}» باید code|name|factor داشته باشد.`);continue;}
+    out.push({code:code0.toLowerCase(),name:name0,factor_to_base:factor,barcode:barcode0||undefined,allow_sale:truthy(sale0,true),allow_purchase:truthy(purchase0,true),retail_price:price>0?Math.round(price):undefined});
+  }
+  return out;
+}
+
 function parseImport(text:string):{rows:ProductImportRow[];errors:string[]}{
   const grid=parseDelimited(text);const errors:string[]=[];
   if(grid.length<2)return{rows:[],errors:["فایل باید یک ردیف عنوان و حداقل یک ردیف کالا داشته باشد."]};
@@ -66,7 +80,7 @@ function parseImport(text:string):{rows:ProductImportRow[];errors:string[]}{
   const rows:ProductImportRow[]=[];const seenSKU=new Map<string,number>();const seenBarcode=new Map<string,number>();
   grid.slice(1,2001).forEach((cells,index)=>{
     const rowNo=index+2;const get=(key:string)=>map[key]==null?"":(cells[map[key]]||"").trim();
-    const title=get("title");const sku=get("sku");const barcode=get("barcode");const onHand=numeric(get("on_hand"));const cost=numeric(get("avg_unit_cost"));const price=numeric(get("selling_price"));
+    const title=get("title");const sku=get("sku");const barcode=get("barcode");const onHand=numeric(get("on_hand"));const cost=numeric(get("avg_unit_cost"));const price=numeric(get("selling_price"));const packages=parsePackages(get("packages"),rowNo,errors);
     if(!title){errors.push(`ردیف ${rowNo}: نام کالا خالی است.`);return;}
     if(!Number.isFinite(onHand)||onHand<0){errors.push(`ردیف ${rowNo}: موجودی معتبر نیست.`);return;}
     if(!Number.isFinite(cost)||cost<0){errors.push(`ردیف ${rowNo}: قیمت خرید معتبر نیست.`);return;}
@@ -74,7 +88,8 @@ function parseImport(text:string):{rows:ProductImportRow[];errors:string[]}{
     if(onHand>0&&cost===0){errors.push(`ردیف ${rowNo}: برای موجودی اولیه باید قیمت خرید وارد شود.`);return;}
     if(sku){const k=sku.toLowerCase();if(seenSKU.has(k)){errors.push(`ردیف ${rowNo}: کد کالا با ردیف ${seenSKU.get(k)} تکراری است.`);return;}seenSKU.set(k,rowNo);}
     if(barcode){const k=barcode.toLowerCase();if(seenBarcode.has(k)){errors.push(`ردیف ${rowNo}: بارکد با ردیف ${seenBarcode.get(k)} تکراری است.`);return;}seenBarcode.set(k,rowNo);}
-    rows.push({row_number:rowNo,sku:sku||undefined,title,brand:get("brand")||undefined,oem_code:get("oem_code")||undefined,barcode:barcode||undefined,unit:get("unit")||undefined,on_hand:onHand,avg_unit_cost:Math.round(cost),selling_price:Math.round(price),visible:price>0&&truthy(get("visible"),false),allow_reservation:truthy(get("allow_reservation"),true),allow_procurement:truthy(get("allow_procurement"),true)});
+    for(const u of packages){if(!u.barcode)continue;const k=u.barcode.toLowerCase();if(seenBarcode.has(k)){errors.push(`ردیف ${rowNo}: بارکد بسته «${u.name}» با ردیف ${seenBarcode.get(k)} تکراری است.`);return;}seenBarcode.set(k,rowNo);}
+    rows.push({row_number:rowNo,sku:sku||undefined,title,brand:get("brand")||undefined,oem_code:get("oem_code")||undefined,barcode:barcode||undefined,unit:get("unit")||undefined,allow_fractional_base_qty:truthy(get("fractional"),false),units:packages,on_hand:onHand,avg_unit_cost:Math.round(cost),selling_price:Math.round(price),visible:price>0&&truthy(get("visible"),false),allow_reservation:truthy(get("allow_reservation"),true),allow_procurement:truthy(get("allow_procurement"),true)});
   });
   if(grid.length-1>2000)errors.push("فایل بیش از ۲۰۰۰ ردیف دارد؛ آن را به چند فایل تقسیم کنید.");
   return{rows,errors};
@@ -82,26 +97,31 @@ function parseImport(text:string):{rows:ProductImportRow[];errors:string[]}{
 
 function downloadTemplate(){
   const content=[
-    "نام کالا,کد کالا,برند,OEM,بارکد,واحد,موجودی,قیمت خرید,قیمت فروش,انتشار شبکه,قابل رزرو,تأمین همکار",
-    "لنت جلو پژو 206 تیپ 5,BRK-206-TXT,Textar,4254.97,,pcs,12,1350000,1780000,بله,بله,بله",
-    "فیلتر روغن پژو 206,FLT-206-SRK,سرکان,206-OF-02,,pcs,24,210000,290000,خیر,بله,بله"
+    "نام کالا,کد کالا,برند,OEM,بارکد,واحد,موجودی اعشاری,بسته‌بندی,موجودی,قیمت خرید,قیمت فروش,انتشار شبکه,قابل رزرو,تأمین همکار",
+    '"لنت جلو پژو 206 تیپ 5",BRK-206-TXT,Textar,4254.97,2900000000017,pcs,خیر,"carton|کارتن|12|2900000000024|بله|بله|20500000;pair|جفت|2||بله|بله|3400000",12,1350000,1780000,بله,بله,بله',
+    '"فیلتر روغن پژو 206",FLT-206-SRK,سرکان,206-OF-02,,pcs,خیر,"box|جعبه|10||بله|بله|",24,210000,290000,خیر,بله,بله'
   ].join("\n");
   const blob=new Blob(["\uFEFF"+content],{type:"text/csv;charset=utf-8"});const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download="autoparts-import-template.csv";a.click();URL.revokeObjectURL(url);
 }
+
+function csvCell(v:unknown){const text=String(v??"");return /[",\n]/.test(text)?`"${text.replace(/"/g,'""')}"`:text}
+function packageCell(p:Product){return (p.units||[]).filter(u=>!u.is_base).map(u=>[u.code,u.name,u.factor_to_base,u.barcode||"",u.allow_sale?"بله":"خیر",u.allow_purchase?"بله":"خیر"].join("|")).join(";")}
+function downloadCatalogRows(products:Product[]){const header=["نام کالا","کد کالا","برند","OEM","بارکد","واحد","موجودی اعشاری","بسته‌بندی"];const lines=[header.join(","),...products.map(p=>[p.title,p.sku||"",p.brand||"",p.oem_code||"",p.barcode||"",p.unit,p.allow_fractional_base_qty?"بله":"خیر",packageCell(p)].map(csvCell).join(","))];const blob=new Blob(["\uFEFF"+lines.join("\n")],{type:"text/csv;charset=utf-8"});const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download="autoparts-catalog-units.csv";a.click();URL.revokeObjectURL(url)}
 
 export default function ImportCenter(){
   const {session}=useAuth();const[fileName,setFileName]=useState("");const[rows,setRows]=useState<ProductImportRow[]>([]);const[errors,setErrors]=useState<string[]>([]);const[busy,setBusy]=useState(false);const[result,setResult]=useState<ProductImportResult|null>(null);const[serverError,setServerError]=useState("");
   const stats=useMemo(()=>({count:rows.length,stock:rows.reduce((s,x)=>s+x.on_hand,0),value:rows.reduce((s,x)=>s+x.on_hand*x.avg_unit_cost,0),offers:rows.filter(x=>x.selling_price>0).length,published:rows.filter(x=>x.selling_price>0&&x.visible).length}),[rows]);
   async function onFile(e:ChangeEvent<HTMLInputElement>){const file=e.target.files?.[0];if(!file)return;setFileName(file.name);setResult(null);setServerError("");try{const parsed=parseImport(await file.text());setRows(parsed.rows);setErrors(parsed.errors);}catch{setRows([]);setErrors(["فایل خوانده نشد. آن را با UTF-8 و فرمت CSV ذخیره کنید."]);}}
   async function commit(){if(!session||!rows.length||errors.length)return;setBusy(true);setServerError("");try{setResult(await importProducts(session,rows));}catch(e){setServerError(e instanceof Error?e.message:"ورود اطلاعات انجام نشد.");}finally{setBusy(false);}}
+  async function exportCatalog(){if(!session)return;setBusy(true);setServerError("");try{downloadCatalogRows(await exportProducts(session));}catch(e){setServerError(e instanceof Error?e.message:"خروجی کالاها ناموفق بود.");}finally{setBusy(false)}}
   return <div className="import-center">
-    <div className="page-head"><div><span className="eyebrow">شروع بدون ورود دستی</span><h1>Import Center</h1><p>فهرست کالا، موجودی اولیه و قیمت‌ها را از خروجی CSV اکسل وارد کن؛ موجودی‌های زنده قبلی هرگز بازنویسی نمی‌شوند.</p></div><button className="ghost-btn" type="button" onClick={downloadTemplate}>دانلود فایل نمونه</button></div>
+    <div className="page-head"><div><span className="eyebrow">شروع بدون ورود دستی</span><h1>Import Center</h1><p>فهرست کالا، موجودی اولیه و قیمت‌ها را از خروجی CSV اکسل وارد کن؛ موجودی‌های زنده قبلی هرگز بازنویسی نمی‌شوند.</p></div><div className="head-actions"><button className="ghost-btn" type="button" onClick={downloadTemplate}>دانلود فایل نمونه</button><button className="ghost-btn" type="button" disabled={busy} onClick={()=>void exportCatalog()}>خروجی کالا + واحدها</button></div></div>
 
     <section className="adoption-callout"><div><span className="adoption-callout-icon">⇧</span><div><b>از نرم‌افزار قبلی مهاجرت می‌کنی؟</b><p>فایل Excel را با گزینه Save As → CSV UTF-8 ذخیره کن. ستون‌ها لازم نیست دقیقاً به همین ترتیب باشند.</p></div></div><div className="adoption-steps"><span><b>۱</b> خروجی CSV</span><span><b>۲</b> بررسی پیش‌نمایش</span><span><b>۳</b> ورود امن</span></div></section>
 
     <section className="panel import-upload-panel">
       <label className="import-dropzone"><input type="file" accept=".csv,.txt,text/csv" onChange={onFile}/><span className="import-drop-icon">CSV</span><b>{fileName||"فایل CSV را انتخاب کن"}</b><small>حداکثر ۲۰۰۰ ردیف در هر فایل · UTF-8</small><em>انتخاب فایل</em></label>
-      <div className="import-rules"><b>ستون‌های قابل تشخیص</b><div><span>نام کالا <i>الزامی</i></span><span>کد کالا / SKU</span><span>OEM</span><span>برند</span><span>بارکد</span><span>موجودی</span><span>قیمت خرید</span><span>قیمت فروش</span><span>انتشار شبکه</span></div></div>
+      <div className="import-rules"><b>ستون‌های قابل تشخیص</b><div><span>نام کالا <i>الزامی</i></span><span>کد کالا / SKU</span><span>OEM</span><span>برند</span><span>بارکد</span><span>بسته‌بندی / ضریب / بارکد بسته</span><span>موجودی</span><span>قیمت خرید</span><span>قیمت فروش</span><span>انتشار شبکه</span></div></div>
     </section>
 
     {errors.length>0&&<section className="error-box import-errors"><b>{errors.length} مورد باید اصلاح شود</b>{errors.slice(0,12).map(x=><span key={x}>{x}</span>)}{errors.length>12&&<small>و {number(errors.length-12)} خطای دیگر...</small>}</section>}

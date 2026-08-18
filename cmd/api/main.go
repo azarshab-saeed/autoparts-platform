@@ -45,7 +45,7 @@ var (
 	buildTime = "unknown"
 )
 
-const latestMigration = "016_advanced_pricing.sql"
+const latestMigration = "017_multi_unit_packaging.sql"
 
 func main() {
 	log.SetFlags(0)
@@ -168,12 +168,71 @@ func main() {
 			api.WriteError(w, api.BadRequest("validation_error", "title is required"))
 			return
 		}
-		out, err := catalogSvc.Create(r.Context(), c.TenantID, in)
+		out, err := catalogSvc.Create(r.Context(), c.TenantID, c.StoreID, in)
 		if err != nil {
 			api.WriteError(w, api.Conflict("product_create_failed", err.Error()))
 			return
 		}
 		api.WriteJSON(w, http.StatusCreated, out)
+	})))
+
+	protected.Handle("GET /v1/products/export", auth.RequireRoles("owner", "admin", "warehouse")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, _ := auth.ClaimsFrom(r.Context())
+		out, err := catalogSvc.Export(r.Context(), c.TenantID)
+		if err != nil {
+			api.WriteError(w, api.Conflict("product_export_failed", err.Error()))
+			return
+		}
+		api.WriteJSON(w, http.StatusOK, map[string]any{"items": out})
+	})))
+
+	protected.HandleFunc("GET /v1/products/{product_id}", func(w http.ResponseWriter, r *http.Request) {
+		c, _ := auth.ClaimsFrom(r.Context())
+		productID, err := uuid.Parse(r.PathValue("product_id"))
+		if err != nil {
+			api.WriteError(w, api.BadRequest("invalid_product_id", "product id must be a UUID"))
+			return
+		}
+		out, err := catalogSvc.Get(r.Context(), c.TenantID, productID)
+		if err != nil {
+			api.WriteError(w, api.NotFound("product_not_found", err.Error()))
+			return
+		}
+		api.WriteJSON(w, http.StatusOK, out)
+	})
+
+	protected.HandleFunc("GET /v1/products/{product_id}/units", func(w http.ResponseWriter, r *http.Request) {
+		c, _ := auth.ClaimsFrom(r.Context())
+		productID, err := uuid.Parse(r.PathValue("product_id"))
+		if err != nil {
+			api.WriteError(w, api.BadRequest("invalid_product_id", "product id must be a UUID"))
+			return
+		}
+		out, err := catalogSvc.Units(r.Context(), c.TenantID, productID)
+		if err != nil {
+			api.WriteError(w, api.NotFound("product_units_not_found", err.Error()))
+			return
+		}
+		api.WriteJSON(w, http.StatusOK, map[string]any{"items": out})
+	})
+	protected.Handle("PUT /v1/products/{product_id}/units", auth.RequireRoles("owner", "admin", "warehouse")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, _ := auth.ClaimsFrom(r.Context())
+		productID, err := uuid.Parse(r.PathValue("product_id"))
+		if err != nil {
+			api.WriteError(w, api.BadRequest("invalid_product_id", "product id must be a UUID"))
+			return
+		}
+		var in catalog.ReplaceUnits
+		if err := decodeJSON(r, &in); err != nil {
+			api.WriteError(w, err)
+			return
+		}
+		out, err := catalogSvc.ReplaceProductUnits(r.Context(), c.TenantID, productID, in)
+		if err != nil {
+			api.WriteError(w, api.Conflict("product_units_update_failed", err.Error()))
+			return
+		}
+		api.WriteJSON(w, http.StatusOK, map[string]any{"items": out})
 	})))
 
 	protected.Handle("POST /v1/products/import", auth.RequireRoles("owner", "admin", "warehouse")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -333,14 +392,15 @@ func main() {
 			return
 		}
 		var in struct {
-			PriceListID uuid.UUID       `json:"price_list_id"`
-			Breaks      []pricing.Break `json:"breaks"`
+			PriceListID   uuid.UUID       `json:"price_list_id"`
+			ProductUnitID *uuid.UUID      `json:"product_unit_id,omitempty"`
+			Breaks        []pricing.Break `json:"breaks"`
 		}
 		if err := decodeJSON(r, &in); err != nil {
 			api.WriteError(w, err)
 			return
 		}
-		out, err := pricingSvc.ReplaceProductBreaks(r.Context(), c.TenantID, c.StoreID, productID, in.PriceListID, in.Breaks)
+		out, err := pricingSvc.ReplaceProductBreaks(r.Context(), c.TenantID, c.StoreID, productID, in.PriceListID, in.ProductUnitID, in.Breaks)
 		if err != nil {
 			api.WriteError(w, api.Conflict("product_pricing_update_failed", err.Error()))
 			return
@@ -1435,10 +1495,11 @@ func main() {
 			PaymentMethod    string     `json:"payment_method"`
 			CustomerID       *uuid.UUID `json:"customer_id,omitempty"`
 			Items            []struct {
-				ProductID uuid.UUID `json:"product_id"`
-				Qty       float64   `json:"qty"`
-				UnitPrice int64     `json:"unit_price"`
-				Title     string    `json:"title,omitempty"`
+				ProductID     uuid.UUID  `json:"product_id"`
+				ProductUnitID *uuid.UUID `json:"product_unit_id,omitempty"`
+				Qty           float64    `json:"qty"`
+				UnitPrice     int64      `json:"unit_price"`
+				Title         string     `json:"title,omitempty"`
 			} `json:"items"`
 		}
 		if err := decodeJSON(r, &in); err != nil {
@@ -1456,7 +1517,7 @@ func main() {
 		}
 		items := make([]sales.CreateSaleItem, 0, len(in.Items))
 		for _, x := range in.Items {
-			items = append(items, sales.CreateSaleItem{ProductID: x.ProductID, Qty: x.Qty, UnitPrice: x.UnitPrice, OverrideReason: "offline_snapshot_price"})
+			items = append(items, sales.CreateSaleItem{ProductID: x.ProductID, ProductUnitID: x.ProductUnitID, Qty: x.Qty, UnitPrice: x.UnitPrice, OverrideReason: "offline_snapshot_price"})
 		}
 		deviceID := d.ID
 		occurred := in.OccurredAt

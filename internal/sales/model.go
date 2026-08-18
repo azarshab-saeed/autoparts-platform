@@ -7,10 +7,11 @@ import (
 )
 
 type CreateSaleItem struct {
-	ProductID      uuid.UUID `json:"product_id"`
-	Qty            float64   `json:"qty"`
-	UnitPrice      int64     `json:"unit_price"`
-	OverrideReason string    `json:"override_reason,omitempty"`
+	ProductID      uuid.UUID  `json:"product_id"`
+	ProductUnitID  *uuid.UUID `json:"product_unit_id,omitempty"`
+	Qty            float64    `json:"qty"`        // commercial quantity in the selected unit
+	UnitPrice      int64      `json:"unit_price"` // price per selected commercial unit
+	OverrideReason string     `json:"override_reason,omitempty"`
 }
 
 type PaymentPart struct {
@@ -49,8 +50,13 @@ type SaleLine struct {
 	ID                  uuid.UUID  `json:"id"`
 	ProductID           uuid.UUID  `json:"product_id"`
 	Title               string     `json:"title"`
-	Qty                 float64    `json:"qty"`
-	ReturnedQty         float64    `json:"returned_qty"`
+	ProductUnitID       *uuid.UUID `json:"product_unit_id,omitempty"`
+	UnitCode            string     `json:"unit_code"`
+	UnitName            string     `json:"unit_name"`
+	ConversionFactor    float64    `json:"conversion_factor"`
+	Qty                 float64    `json:"qty"` // commercial quantity
+	BaseQty             float64    `json:"base_qty"`
+	ReturnedQty         float64    `json:"returned_qty"` // commercial quantity
 	ReturnableQty       float64    `json:"returnable_qty"`
 	UnitPrice           int64      `json:"unit_price"`
 	UnitCost            int64      `json:"unit_cost"`

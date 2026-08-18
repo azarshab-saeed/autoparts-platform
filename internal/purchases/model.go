@@ -3,9 +3,10 @@ package purchases
 import "github.com/google/uuid"
 
 type CreateItem struct {
-	ProductID uuid.UUID `json:"product_id"`
-	Qty       float64   `json:"qty"`
-	UnitCost  int64     `json:"unit_cost"`
+	ProductID     uuid.UUID  `json:"product_id"`
+	ProductUnitID *uuid.UUID `json:"product_unit_id,omitempty"`
+	Qty           float64    `json:"qty"`       // commercial quantity
+	UnitCost      int64      `json:"unit_cost"` // cost per selected commercial unit
 }
 
 type PaymentPart struct {
@@ -33,14 +34,19 @@ type Purchase struct {
 }
 
 type PurchaseLine struct {
-	ID            uuid.UUID `json:"id"`
-	ProductID     uuid.UUID `json:"product_id"`
-	Title         string    `json:"title"`
-	Qty           float64   `json:"qty"`
-	ReturnedQty   float64   `json:"returned_qty"`
-	ReturnableQty float64   `json:"returnable_qty"`
-	UnitCost      int64     `json:"unit_cost"`
-	LineTotal     int64     `json:"line_total"`
+	ID               uuid.UUID  `json:"id"`
+	ProductID        uuid.UUID  `json:"product_id"`
+	Title            string     `json:"title"`
+	ProductUnitID    *uuid.UUID `json:"product_unit_id,omitempty"`
+	UnitCode         string     `json:"unit_code"`
+	UnitName         string     `json:"unit_name"`
+	ConversionFactor float64    `json:"conversion_factor"`
+	Qty              float64    `json:"qty"`
+	BaseQty          float64    `json:"base_qty"`
+	ReturnedQty      float64    `json:"returned_qty"`
+	ReturnableQty    float64    `json:"returnable_qty"`
+	UnitCost         int64      `json:"unit_cost"`
+	LineTotal        int64      `json:"line_total"`
 }
 
 type PurchaseDetail struct {

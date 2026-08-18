@@ -25,11 +25,12 @@ func (s *Service) List(ctx context.Context, tenantID, storeID, warehouseID uuid.
 		return nil, errors.New("warehouse does not belong to authenticated store")
 	}
 	rows, err := s.db.Query(ctx, `
-SELECT p.id,p.title,p.sku,b.on_hand,b.reserved,(b.on_hand-b.reserved),b.avg_unit_cost,
+SELECT p.id,p.title,p.sku,COALESCE(pu.code,p.unit),COALESCE(pu.name,p.unit),b.on_hand,b.reserved,(b.on_hand-b.reserved),b.avg_unit_cost,
        COALESCE(r.min_qty,0),COALESCE(r.target_qty,0),
        ((b.on_hand-b.reserved) <= COALESCE(r.min_qty,0) AND COALESCE(r.min_qty,0)>0) AS low_stock
 FROM inventory_balances b
 JOIN products p ON p.id=b.product_id AND p.tenant_id=b.tenant_id
+LEFT JOIN product_units pu ON pu.tenant_id=p.tenant_id AND pu.product_id=p.id AND pu.is_base AND pu.active
 LEFT JOIN inventory_reorder_points r ON r.tenant_id=b.tenant_id AND r.warehouse_id=b.warehouse_id AND r.product_id=b.product_id
 WHERE b.tenant_id=$1 AND b.warehouse_id=$2 AND p.deleted_at IS NULL
   AND (NOT $3 OR ((b.on_hand-b.reserved) <= COALESCE(r.min_qty,0) AND COALESCE(r.min_qty,0)>0))
@@ -41,7 +42,7 @@ ORDER BY low_stock DESC,p.title,p.id LIMIT $4 OFFSET $5`, tenantID, warehouseID,
 	out := make([]Stock, 0, limit)
 	for rows.Next() {
 		var x Stock
-		if err = rows.Scan(&x.ProductID, &x.Title, &x.SKU, &x.OnHand, &x.Reserved, &x.Available, &x.AvgUnitCost, &x.MinQty, &x.TargetQty, &x.LowStock); err != nil {
+		if err = rows.Scan(&x.ProductID, &x.Title, &x.SKU, &x.BaseUnitCode, &x.BaseUnitName, &x.OnHand, &x.Reserved, &x.Available, &x.AvgUnitCost, &x.MinQty, &x.TargetQty, &x.LowStock); err != nil {
 			return nil, err
 		}
 		out = append(out, x)
@@ -59,6 +60,15 @@ func (s *Service) SetReorderPoint(ctx context.Context, tenantID, storeID, wareho
 	}
 	if !ok {
 		return errors.New("warehouse does not belong to authenticated store")
+	}
+	var allowFractional bool
+	if err := s.db.QueryRow(ctx, `SELECT allow_fractional_base_qty FROM products WHERE id=$1 AND tenant_id=$2 AND deleted_at IS NULL`, productID, tenantID).Scan(&allowFractional); errors.Is(err, pgx.ErrNoRows) {
+		return errors.New("product not found")
+	} else if err != nil {
+		return err
+	}
+	if !allowFractional && (math.Abs(minQty-math.Round(minQty)) > 1e-9 || math.Abs(targetQty-math.Round(targetQty)) > 1e-9) {
+		return errors.New("reorder quantities must be whole base units for this product")
 	}
 	_, err := s.db.Exec(ctx, `INSERT INTO inventory_reorder_points(tenant_id,warehouse_id,product_id,min_qty,target_qty) VALUES($1,$2,$3,$4,$5) ON CONFLICT(tenant_id,warehouse_id,product_id) DO UPDATE SET min_qty=EXCLUDED.min_qty,target_qty=EXCLUDED.target_qty,updated_at=now()`, tenantID, warehouseID, productID, minQty, targetQty)
 	return err
@@ -90,6 +100,15 @@ func (s *Service) Adjust(ctx context.Context, cmd AdjustmentCommand) (uuid.UUID,
 	}
 	var onHand, reserved float64
 	var avg int64
+	var allowFractional bool
+	if err = tx.QueryRow(ctx, `SELECT allow_fractional_base_qty FROM products WHERE id=$1 AND tenant_id=$2 AND deleted_at IS NULL`, cmd.ProductID, cmd.TenantID).Scan(&allowFractional); errors.Is(err, pgx.ErrNoRows) {
+		return uuid.Nil, errors.New("product not found")
+	} else if err != nil {
+		return uuid.Nil, err
+	}
+	if !allowFractional && math.Abs(cmd.QtyDelta-math.Round(cmd.QtyDelta)) > 1e-9 {
+		return uuid.Nil, errors.New("inventory adjustment must be a whole base unit for this product")
+	}
 	err = tx.QueryRow(ctx, `SELECT on_hand,reserved,avg_unit_cost FROM inventory_balances WHERE tenant_id=$1 AND warehouse_id=$2 AND product_id=$3 FOR UPDATE`, cmd.TenantID, cmd.WarehouseID, cmd.ProductID).Scan(&onHand, &reserved, &avg)
 	if errors.Is(err, pgx.ErrNoRows) {
 		if cmd.QtyDelta < 0 {
