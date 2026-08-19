@@ -17,7 +17,7 @@ import type {
   SaleItem,
   SettlementResult,
   Supplier,
-  UserSession, NetworkSearchResult, NetworkStoreOffer, StoreNetworkProfile, NetworkReservation, NetworkReservationStatus, ReservationFulfillmentResult, Expense, ExpenseCategory, PartyStatement, ProfitLoss, CashReport, DailyClosing, DashboardSummary, InventoryInsightReport, PagedResult, PurchaseHistoryItem, SaleHistoryItem, NetworkProcurement, ProcurementReceiveResult, VehicleMake, ProductSearchMetadata, ProductSearchTerm, ProductFitmentInput, AuditLogEntry, ProductImportRow, ProductImportResult, EdgePairing, EdgeDevice, BankAccount, BankLedger, StoreCheck, CheckSummary, CheckDirection, CheckAction, PriceList, PricingSettings, PriceBreak, ProductPricing, PricingQuote
+  UserSession, NetworkSearchResult, NetworkStoreOffer, StoreNetworkProfile, NetworkReservation, NetworkReservationStatus, ReservationFulfillmentResult, Expense, ExpenseCategory, PartyStatement, ProfitLoss, CashReport, DailyClosing, DashboardSummary, InventoryInsightReport, PagedResult, PurchaseHistoryItem, SaleHistoryItem, NetworkProcurement, ProcurementReceiveResult, VehicleMake, ProductSearchMetadata, ProductSearchTerm, ProductFitmentInput, AuditLogEntry, ProductImportRow, ProductImportResult, EdgePairing, EdgeDevice, BankAccount, BankLedger, StoreCheck, CheckSummary, CheckDirection, CheckAction, MaturityAverageResult, FinanceIntelligenceDashboard, BankStatementInput, BankStatementImportResult, BankStatementLine, ReconciliationCandidate, ReconciliationMatch, PriceList, PricingSettings, PriceBreak, ProductPricing, PricingQuote
 } from "./types";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
@@ -343,6 +343,40 @@ export async function transitionStoreCheck(session:UserSession,id:string,action:
     const updated={...current,status:nextStatus[action],bank_account_id:input.bankAccountId||current.bank_account_id,endorsed_supplier_id:action==="endorse"?input.supplierId:(action==="return_endorsement"?undefined:current.endorsed_supplier_id),updated_at:new Date().toISOString()};mockChecks[i]=updated;return{...updated};
   }
   return request<StoreCheck>(`/v1/checks/${encodeURIComponent(id)}/transition`,{method:"POST",headers:{"Idempotency-Key":crypto.randomUUID()},body:JSON.stringify({action,bank_account_id:input.bankAccountId||undefined,supplier_id:input.supplierId||undefined,note:input.note||""})},session.token);
+}
+let mockStatementLines:BankStatementLine[]=[];
+let mockReconciliationMatches:ReconciliationMatch[]=[];
+export async function getFinanceIntelligence(session:UserSession,days=90):Promise<FinanceIntelligenceDashboard>{
+  if(MOCK_MODE){const unmatched=mockStatementLines.filter(x=>x.status!=="matched");const bank=mockBankAccounts.reduce((s,x)=>s+x.balance,0);return{generated_at:new Date().toISOString(),window_days:days,bank_balance:bank,receivable_open_amount:0,payable_open_amount:0,overdue_receivable_amount:0,overdue_payable_amount:0,next_30_net:0,projected_bank_balance_30:bank,unreconciled_bank_lines:unmatched.length,unreconciled_bank_amount:unmatched.reduce((s,x)=>s+x.remaining_amount,0),maturity_buckets:[],cash_calendar:[],customer_risks:[]};}
+  return request<FinanceIntelligenceDashboard>(`/v1/finance/check-intelligence?days=${encodeURIComponent(String(days))}`,{},session.token);
+}
+export async function getCheckMaturityAverage(session:UserSession,checkIds:string[],referenceDate?:string):Promise<MaturityAverageResult>{
+  if(MOCK_MODE){const selected=mockChecks.filter(x=>checkIds.includes(x.id));if(!selected.length)throw new Error("حداقل یک چک انتخاب کن");const dir=selected[0].direction;if(selected.some(x=>x.direction!==dir))throw new Error("چک‌های دریافتی و پرداختی را جداگانه راس‌گیری کن");const base=new Date(`${referenceDate||new Date().toISOString().slice(0,10)}T00:00:00Z`);const total=selected.reduce((s,x)=>s+x.amount,0);const weighted=Math.round(selected.reduce((s,x)=>s+x.amount*Math.round((new Date(`${x.due_date}T00:00:00Z`).getTime()-base.getTime())/86400000),0)/total);const maturity=new Date(base);maturity.setUTCDate(maturity.getUTCDate()+weighted);return{direction:dir,count:selected.length,total_amount:total,reference_date:base.toISOString().slice(0,10),weighted_days:weighted,maturity_date:maturity.toISOString().slice(0,10),items:selected.map(x=>({check_id:x.id,check_number:x.check_number,amount:x.amount,due_date:x.due_date,days_from_reference:Math.round((new Date(`${x.due_date}T00:00:00Z`).getTime()-base.getTime())/86400000),weight_bps:Math.round(x.amount*10000/total)}))};}
+  return request<MaturityAverageResult>("/v1/checks/maturity-average",{method:"POST",body:JSON.stringify({check_ids:checkIds,reference_date:referenceDate||""})},session.token);
+}
+export async function getBankStatementLines(session:UserSession,bankAccountId:string):Promise<BankStatementLine[]>{
+  if(MOCK_MODE)return mockStatementLines.filter(x=>x.bank_account_id===bankAccountId).map(x=>({...x}));
+  const out=await request<{items:BankStatementLine[]}>(`/v1/banking/accounts/${encodeURIComponent(bankAccountId)}/statement-lines`,{},session.token);return out.items??[];
+}
+export async function importBankStatement(session:UserSession,bankAccountId:string,lines:BankStatementInput[]):Promise<BankStatementImportResult>{
+  if(MOCK_MODE){let imported=0,duplicates=0;for(const line of lines){if(mockStatementLines.some(x=>x.bank_account_id===bankAccountId&&x.date===line.date&&x.amount===line.amount&&x.reference===line.reference)){duplicates++;continue}mockStatementLines.unshift({id:crypto.randomUUID(),bank_account_id:bankAccountId,date:line.date,amount:line.amount,description:line.description,reference:line.reference,external_id:line.external_id,matched_amount:0,remaining_amount:Math.abs(line.amount),status:"unmatched",duplicate_suspected:false,created_at:new Date().toISOString()});imported++;}return{imported,duplicates};}
+  return request<BankStatementImportResult>(`/v1/banking/accounts/${encodeURIComponent(bankAccountId)}/statement-lines/import`,{method:"POST",body:JSON.stringify({lines})},session.token);
+}
+export async function getReconciliationCandidates(session:UserSession,bankAccountId:string,statementLineId:string):Promise<ReconciliationCandidate[]>{
+  if(MOCK_MODE){const line=mockStatementLines.find(x=>x.id===statementLineId);if(!line)return[];return[{journal_entry_id:`mock-je-${line.id}`,journal_id:`mock-j-${line.id}`,reference_type:line.amount>0?"customer_receipt":"supplier_payment",reference_id:line.id,posted_at:`${line.date}T12:00:00Z`,change:line.amount,matched_amount:0,remaining_amount:Math.abs(line.amount),exact_amount:true}];}
+  const out=await request<{items:ReconciliationCandidate[]}>(`/v1/banking/accounts/${encodeURIComponent(bankAccountId)}/reconciliation-candidates?statement_line_id=${encodeURIComponent(statementLineId)}`,{},session.token);return out.items??[];
+}
+export async function matchBankStatementLine(session:UserSession,statementLineId:string,journalEntryId:string,amount=0,note=""):Promise<ReconciliationMatch>{
+  if(MOCK_MODE){const line=mockStatementLines.find(x=>x.id===statementLineId);if(!line)throw new Error("تراکنش بانک پیدا نشد");const matched=Math.min(amount||line.remaining_amount,line.remaining_amount);line.matched_amount+=matched;line.remaining_amount=Math.max(0,Math.abs(line.amount)-line.matched_amount);line.status=line.remaining_amount===0?"matched":"partial";const row:ReconciliationMatch={id:crypto.randomUUID(),statement_line_id:line.id,journal_entry_id:journalEntryId,matched_amount:matched,note,reference_type:line.amount>0?"customer_receipt":"supplier_payment",reference_id:line.id,posted_at:`${line.date}T12:00:00Z`,created_at:new Date().toISOString()};mockReconciliationMatches.push(row);return row;}
+  return request<ReconciliationMatch>(`/v1/banking/statement-lines/${encodeURIComponent(statementLineId)}/match`,{method:"POST",body:JSON.stringify({journal_entry_id:journalEntryId,amount,note})},session.token);
+}
+export async function getReconciliationMatches(session:UserSession,statementLineId:string):Promise<ReconciliationMatch[]>{
+  if(MOCK_MODE)return mockReconciliationMatches.filter(x=>x.statement_line_id===statementLineId).map(x=>({...x}));
+  const out=await request<{items:ReconciliationMatch[]}>(`/v1/banking/statement-lines/${encodeURIComponent(statementLineId)}/matches`,{},session.token);return out.items??[];
+}
+export async function unmatchBankStatementLine(session:UserSession,statementLineId:string,matchId:string):Promise<void>{
+  if(MOCK_MODE){const i=mockReconciliationMatches.findIndex(x=>x.id===matchId&&x.statement_line_id===statementLineId);if(i<0)throw new Error("تطبیق پیدا نشد");const [m]=mockReconciliationMatches.splice(i,1);const line=mockStatementLines.find(x=>x.id===statementLineId);if(line){line.matched_amount=Math.max(0,line.matched_amount-m.matched_amount);line.remaining_amount=Math.max(0,Math.abs(line.amount)-line.matched_amount);line.status=line.matched_amount===0?"unmatched":line.remaining_amount===0?"matched":"partial";}return;}
+  await request<Record<string,never>>(`/v1/banking/statement-lines/${encodeURIComponent(statementLineId)}/matches/${encodeURIComponent(matchId)}`,{method:"DELETE"},session.token);
 }
 export async function getSaleDetail(session:UserSession,id:string):Promise<SaleDetail>{ if(MOCK_MODE){if(id!==mockSaleDetail.id)throw new Error(`در Mock Mode شناسه نمونه: ${mockSaleDetail.id}`);return structuredClone(mockSaleDetail);} return request<SaleDetail>(`/v1/sales/${encodeURIComponent(id)}`,{},session.token);}
 export async function getPurchaseDetail(session:UserSession,id:string):Promise<PurchaseDetail>{ if(MOCK_MODE){if(id!==mockPurchaseDetail.id)throw new Error(`در Mock Mode شناسه نمونه: ${mockPurchaseDetail.id}`);return structuredClone(mockPurchaseDetail);} return request<PurchaseDetail>(`/v1/purchases/${encodeURIComponent(id)}`,{},session.token);}

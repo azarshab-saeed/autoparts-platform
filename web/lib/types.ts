@@ -158,6 +158,17 @@ export type StoreCheck = {
 };
 export type CheckSummary = { receivable_open_amount: number; payable_open_amount: number; due_today_count: number; due_next_7_count: number; overdue_count: number; bounced_count: number };
 export type CheckAction = "deposit"|"clear"|"bounce"|"endorse"|"return_endorsement"|"return"|"cancel";
+export type MaturityAverageItem = { check_id:string; check_number:string; amount:number; due_date:string; days_from_reference:number; weight_bps:number };
+export type MaturityAverageResult = { direction:CheckDirection; count:number; total_amount:number; reference_date:string; weighted_days:number; maturity_date:string; items:MaturityAverageItem[] };
+export type MaturityBucket = { key:string; label:string; receivable_count:number; receivable_amount:number; payable_count:number; payable_amount:number };
+export type CashCalendarDay = { date:string; receivable_amount:number; payable_amount:number; net:number; projected_balance:number };
+export type CustomerCheckRisk = { customer_id:string; customer_name:string; total_count:number; total_amount:number; open_amount:number; overdue_count:number; overdue_amount:number; bounced_count:number; bounced_amount:number; bounce_rate_bps:number; overdue_rate_bps:number; max_overdue_days:number; risk_level:"low"|"medium"|"high" };
+export type FinanceIntelligenceDashboard = { generated_at:string; window_days:number; bank_balance:number; receivable_open_amount:number; payable_open_amount:number; overdue_receivable_amount:number; overdue_payable_amount:number; next_30_net:number; projected_bank_balance_30:number; unreconciled_bank_lines:number; unreconciled_bank_amount:number; maturity_buckets:MaturityBucket[]; cash_calendar:CashCalendarDay[]; customer_risks:CustomerCheckRisk[] };
+export type BankStatementInput = { date:string; amount:number; description?:string; reference?:string; external_id?:string };
+export type BankStatementImportResult = { imported:number; duplicates:number };
+export type BankStatementLine = { id:string; bank_account_id:string; date:string; amount:number; description?:string; reference?:string; external_id?:string; matched_amount:number; remaining_amount:number; status:"unmatched"|"partial"|"matched"; duplicate_suspected:boolean; created_at:string };
+export type ReconciliationCandidate = { journal_entry_id:string; journal_id:string; reference_type:string; reference_id:string; posted_at:string; change:number; matched_amount:number; remaining_amount:number; exact_amount:boolean };
+export type ReconciliationMatch = { id:string; statement_line_id:string; journal_entry_id:string; matched_amount:number; note?:string; reference_type?:string; reference_id?:string; posted_at?:string; created_at:string };
 export type ReturnableLine = {
   id: string;
   product_id: string;

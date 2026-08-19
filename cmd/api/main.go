@@ -45,7 +45,7 @@ var (
 	buildTime = "unknown"
 )
 
-const latestMigration = "017_multi_unit_packaging.sql"
+const latestMigration = "018_bank_reconciliation_intelligence.sql"
 
 func main() {
 	log.SetFlags(0)
@@ -854,6 +854,146 @@ func main() {
 			return
 		}
 		api.WriteJSON(w, http.StatusOK, out)
+	})))
+
+	protected.Handle("GET /v1/finance/check-intelligence", auth.RequireRoles("owner", "admin", "accountant")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, _ := auth.ClaimsFrom(r.Context())
+		days := 90
+		if raw := strings.TrimSpace(r.URL.Query().Get("days")); raw != "" {
+			v, err := strconv.Atoi(raw)
+			if err != nil || v < 7 || v > 180 {
+				api.WriteError(w, api.BadRequest("invalid_days", "days must be between 7 and 180"))
+				return
+			}
+			days = v
+		}
+		out, err := financeSvc.FinanceIntelligence(r.Context(), c.TenantID, c.StoreID, time.Now(), days)
+		if err != nil {
+			api.WriteError(w, api.Conflict("finance_intelligence_failed", err.Error()))
+			return
+		}
+		api.WriteJSON(w, http.StatusOK, out)
+	})))
+	protected.Handle("POST /v1/checks/maturity-average", auth.RequireRoles("owner", "admin", "accountant")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, _ := auth.ClaimsFrom(r.Context())
+		var cmd finance.MaturityAverageCommand
+		if err := decodeJSON(r, &cmd); err != nil {
+			api.WriteError(w, err)
+			return
+		}
+		cmd.TenantID, cmd.StoreID = c.TenantID, c.StoreID
+		out, err := financeSvc.MaturityAverage(r.Context(), cmd, time.Now())
+		if err != nil {
+			api.WriteError(w, api.BadRequest("maturity_average_rejected", err.Error()))
+			return
+		}
+		api.WriteJSON(w, http.StatusOK, out)
+	})))
+	protected.Handle("GET /v1/banking/accounts/{id}/statement-lines", auth.RequireRoles("owner", "admin", "accountant")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, _ := auth.ClaimsFrom(r.Context())
+		id, err := uuid.Parse(r.PathValue("id"))
+		if err != nil {
+			api.WriteError(w, api.BadRequest("invalid_bank_account_id", "bank account id must be a UUID"))
+			return
+		}
+		out, err := financeSvc.ListBankStatementLines(r.Context(), c.TenantID, c.StoreID, id)
+		if err != nil {
+			api.WriteError(w, api.Conflict("bank_statement_failed", err.Error()))
+			return
+		}
+		api.WriteJSON(w, http.StatusOK, map[string]any{"items": out})
+	})))
+	protected.Handle("POST /v1/banking/accounts/{id}/statement-lines/import", auth.RequireRoles("owner", "admin", "accountant")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, _ := auth.ClaimsFrom(r.Context())
+		id, err := uuid.Parse(r.PathValue("id"))
+		if err != nil {
+			api.WriteError(w, api.BadRequest("invalid_bank_account_id", "bank account id must be a UUID"))
+			return
+		}
+		var cmd finance.BankStatementImportCommand
+		if err := decodeJSON(r, &cmd); err != nil {
+			api.WriteError(w, err)
+			return
+		}
+		cmd.TenantID, cmd.StoreID, cmd.BankAccountID, cmd.ActorUserID = c.TenantID, c.StoreID, id, c.UserID
+		out, err := financeSvc.ImportBankStatement(r.Context(), cmd)
+		if err != nil {
+			api.WriteError(w, api.BadRequest("bank_statement_import_rejected", err.Error()))
+			return
+		}
+		api.WriteJSON(w, http.StatusCreated, out)
+	})))
+	protected.Handle("GET /v1/banking/accounts/{id}/reconciliation-candidates", auth.RequireRoles("owner", "admin", "accountant")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, _ := auth.ClaimsFrom(r.Context())
+		bankID, err := uuid.Parse(r.PathValue("id"))
+		if err != nil {
+			api.WriteError(w, api.BadRequest("invalid_bank_account_id", "bank account id must be a UUID"))
+			return
+		}
+		lineID, err := uuid.Parse(strings.TrimSpace(r.URL.Query().Get("statement_line_id")))
+		if err != nil {
+			api.WriteError(w, api.BadRequest("invalid_statement_line_id", "statement_line_id must be a UUID"))
+			return
+		}
+		out, err := financeSvc.ReconciliationCandidates(r.Context(), c.TenantID, c.StoreID, bankID, lineID)
+		if err != nil {
+			api.WriteError(w, api.BadRequest("reconciliation_candidates_failed", err.Error()))
+			return
+		}
+		api.WriteJSON(w, http.StatusOK, map[string]any{"items": out})
+	})))
+	protected.Handle("POST /v1/banking/statement-lines/{id}/match", auth.RequireRoles("owner", "admin", "accountant")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, _ := auth.ClaimsFrom(r.Context())
+		lineID, err := uuid.Parse(r.PathValue("id"))
+		if err != nil {
+			api.WriteError(w, api.BadRequest("invalid_statement_line_id", "statement line id must be a UUID"))
+			return
+		}
+		var cmd finance.ReconciliationMatchCommand
+		if err := decodeJSON(r, &cmd); err != nil {
+			api.WriteError(w, err)
+			return
+		}
+		cmd.TenantID, cmd.StoreID, cmd.ActorUserID, cmd.StatementLineID = c.TenantID, c.StoreID, c.UserID, lineID
+		out, err := financeSvc.MatchBankStatementLine(r.Context(), cmd)
+		if err != nil {
+			api.WriteError(w, api.BadRequest("reconciliation_match_rejected", err.Error()))
+			return
+		}
+		api.WriteJSON(w, http.StatusCreated, out)
+	})))
+	protected.Handle("GET /v1/banking/statement-lines/{id}/matches", auth.RequireRoles("owner", "admin", "accountant")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, _ := auth.ClaimsFrom(r.Context())
+		lineID, err := uuid.Parse(r.PathValue("id"))
+		if err != nil {
+			api.WriteError(w, api.BadRequest("invalid_statement_line_id", "statement line id must be a UUID"))
+			return
+		}
+		out, err := financeSvc.ListReconciliationMatches(r.Context(), c.TenantID, c.StoreID, lineID)
+		if err != nil {
+			api.WriteError(w, api.BadRequest("reconciliation_matches_failed", err.Error()))
+			return
+		}
+		api.WriteJSON(w, http.StatusOK, map[string]any{"items": out})
+	})))
+	protected.Handle("DELETE /v1/banking/statement-lines/{id}/matches/{match_id}", auth.RequireRoles("owner", "admin", "accountant")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, _ := auth.ClaimsFrom(r.Context())
+		lineID, err := uuid.Parse(r.PathValue("id"))
+		if err != nil {
+			api.WriteError(w, api.BadRequest("invalid_statement_line_id", "statement line id must be a UUID"))
+			return
+		}
+		matchID, err := uuid.Parse(r.PathValue("match_id"))
+		if err != nil {
+			api.WriteError(w, api.BadRequest("invalid_reconciliation_match_id", "reconciliation match id must be a UUID"))
+			return
+		}
+		err = financeSvc.UnmatchBankStatementLine(r.Context(), finance.ReconciliationUnmatchCommand{TenantID: c.TenantID, StoreID: c.StoreID, ActorUserID: c.UserID, StatementLineID: lineID, MatchID: matchID})
+		if err != nil {
+			api.WriteError(w, api.BadRequest("reconciliation_unmatch_rejected", err.Error()))
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
 	})))
 
 	protected.Handle("GET /v1/checks", auth.RequireRoles("owner", "admin", "cashier", "accountant")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

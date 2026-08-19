@@ -12,9 +12,9 @@ The goal is not merely to reproduce Holoo accounting screens. The goal is to rem
 
 ## Current checkpoint
 
-- **Latest completed product checkpoint:** Phase 15.12 — Multi-Unit & Packaging + Product Setup Wizard
-- **Next product phase:** **Phase 15.13 — Bank Reconciliation & Check Intelligence**
-- Phase 15.13 should remain the next phase unless a verified blocker makes it impossible to implement safely.
+- **Latest completed product checkpoint:** Phase 15.13 — Bank Reconciliation & Check Intelligence
+- **Next product phase:** **Phase 15.14 — Tax, VAT & Official Invoicing Foundation**
+- Phase 15.14 should remain the next phase unless a verified blocker makes it impossible to implement safely.
 - Build/dependency/release hardening tasks are important, but they do **not** replace this product roadmap. They should be handled as blocking fixes, maintenance slices, or release gates unless they materially change product capability.
 
 ---
@@ -41,7 +41,7 @@ We should not spend the roadmap trying to win only by copying a mature accountin
 
 ---
 
-## Competitive status after Phase 15.12
+## Competitive status after Phase 15.13
 
 | Area | Current status | Strategic position |
 |---|---|---|
@@ -70,8 +70,9 @@ We should not spend the roadmap trying to win only by copying a mature accountin
 | Wholesale/retail/mechanic pricing | **Implemented in 15.11** | Customer + quantity aware pricing |
 | Multi-unit / pack / carton handling | **Implemented in 15.12** | Migration blocker closed; canonical base-stock model |
 | New-product barcode/package setup | **Implemented in 15.12** | Faster setup than fragmented legacy workflows |
-| Check maturity averaging (راس‌گیری) | **Missing** | Important professional finance gap |
-| Bank reconciliation | **Missing** | Important finance gap |
+| Check maturity averaging (راس‌گیری) | **Implemented in 15.13** | Professional finance gap closed |
+| Bank reconciliation | **Implemented in 15.13** | Full/partial matching + audited undo |
+| Future check cash-flow / customer risk | **Implemented in 15.13** | Forward-looking management advantage |
 | Tax/VAT and official invoicing | **Missing** | Major migration blocker |
 | Iranian Modian integration | **Missing** | Major migration blocker |
 | Advanced invoice/document designer | **Missing** | Important operational gap |
@@ -247,7 +248,7 @@ A wholesaler or mature parts shop should not need a second system merely because
 
 ## Phase 15.13 — Bank Reconciliation & Check Intelligence
 
-**Status:** PLANNED
+**Status:** DONE
 
 ### Objective
 
@@ -265,6 +266,20 @@ Move checks/banking from "recording transactions" to a professional financial co
 - bank/check dashboard for owner/accountant;
 - overdue and bounced exposure by customer;
 - optional customer credit/risk indicators based on actual history.
+
+### Delivered in Phase 15.13
+
+- weighted check maturity averaging (راس‌گیری) for selected receivable or payable checks with Jalali/Gregorian reference-date input;
+- future check cash-in/cash-out calendar with projected bank balance and maturity buckets;
+- owner/accountant dashboard for open/overdue receivable and payable exposure;
+- customer check-risk indicators using overdue amount, bounced history, bounce rate and maximum overdue age;
+- tenant/store-scoped bank statement import with exact duplicate fingerprint protection;
+- reconciliation candidate assistance from real bank GL journal entries, same direction and ±14-day proximity;
+- full and partial reconciliation without mutating or recreating accounting journals;
+- duplicate-suspected statement-line flagging to assist manual review;
+- reconciliation history plus audited undo/reopen for mistaken matches;
+- immutable reconciliation event audit for import, match and unmatch actions;
+- dedicated **Finance Control** UI for dashboard, maturity averaging and bank reconciliation.
 
 ### Competitive outcome
 
@@ -462,8 +477,8 @@ Unless this document is intentionally revised, continue in this order:
 15.10   Checks Pagination & Acceptance           DONE
 15.11   Advanced Pricing & Trade Terms            DONE
 15.12   Multi-Unit & Packaging + Product Wizard   DONE
-15.13   Bank Reconciliation & Check Intelligence  NEXT
-15.14   Tax, VAT & Official Invoicing Foundation  PLANNED
+15.13   Bank Reconciliation & Check Intelligence  DONE
+15.14   Tax, VAT & Official Invoicing Foundation  NEXT
 15.15   Iranian Modian Integration                PLANNED
 15.16   Invoice Designer & Store Documents        PLANNED
 15.17   Management Intelligence & User Performance PLANNED
