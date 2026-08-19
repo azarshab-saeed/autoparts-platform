@@ -59,6 +59,7 @@ grep -Fq 'tax_amount' migrations/019_tax_official_invoicing.sql || fail 'histori
 grep -Fq 'VAT_PAYABLE' internal/sales/service.go || fail 'sales accounting does not separate VAT payable'
 grep -Fq '/v1/tax/quote' cmd/api/main.go || fail 'tax quote route is missing'
 grep -Fq '/v1/tax/invoices/{id}/print-data' cmd/api/main.go || fail 'official invoice print data route is missing'
+if grep -RInE --include='*.go' '\\$[0-9]+[[:space:]]*[+-][[:space:]]*interval' internal cmd; then fail 'SQL interval arithmetic on bind parameters must use an explicit timestamp/date cast'; fi
 test -f web/app/store/tax/page.tsx || fail 'tax management page is missing'
 test -f 'web/app/store/tax/invoices/[id]/page.tsx' || fail 'official invoice print page is missing'
 test -f web/app/store/finance-control/page.tsx || fail 'finance intelligence control page is missing'

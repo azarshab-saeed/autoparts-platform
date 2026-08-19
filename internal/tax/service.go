@@ -379,7 +379,7 @@ func (s *Service) ListInvoices(ctx context.Context, tenantID, storeID uuid.UUID,
 	rows, err := s.db.Query(ctx, `
       SELECT s.id,s.invoice_mode,s.invoice_state,COALESCE(s.invoice_number_display,''),s.customer_id,COALESCE(c.name,''),s.net_amount,s.tax_amount,s.total_amount,s.created_at,COUNT(*) OVER()::int
       FROM sales s LEFT JOIN customers c ON c.id=s.customer_id AND c.tenant_id=s.tenant_id AND c.store_id=s.store_id
-      WHERE s.tenant_id=$1 AND s.store_id=$2 AND s.created_at >= $3 AND s.created_at < $4 + interval '1 day' AND ($5='all' OR s.invoice_mode=$5)
+      WHERE s.tenant_id=$1 AND s.store_id=$2 AND s.created_at >= $3::timestamptz AND s.created_at < ($4::timestamptz + interval '1 day') AND ($5='all' OR s.invoice_mode=$5)
       ORDER BY s.created_at DESC,s.id DESC LIMIT $6 OFFSET $7`, tenantID, storeID, from, to, mode, limit, offset)
 	if err != nil {
 		return nil, 0, err

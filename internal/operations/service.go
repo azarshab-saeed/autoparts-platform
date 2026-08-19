@@ -45,7 +45,7 @@ func (s *Service) ListSales(ctx context.Context, tenantID, storeID uuid.UUID, fr
 		       COUNT(*) OVER()::int
 		FROM sales s
 		LEFT JOIN customers c ON c.id=s.customer_id AND c.tenant_id=s.tenant_id AND c.store_id=s.store_id
-		WHERE s.tenant_id=$1 AND s.store_id=$2 AND s.created_at >= $3 AND s.created_at < $4 + interval '1 day'
+		WHERE s.tenant_id=$1 AND s.store_id=$2 AND s.created_at >= $3::timestamptz AND s.created_at < ($4::timestamptz + interval '1 day')
 		  AND ($5='' OR s.customer_id=NULLIF($5,'')::uuid)
 		  AND ($6='%%' OR lower(COALESCE(c.name,'')) LIKE $6 OR lower(s.id::text) LIKE $6)` + paymentFilter + `
 		ORDER BY s.created_at DESC,s.id DESC LIMIT $7 OFFSET $8`
@@ -96,7 +96,7 @@ func (s *Service) ListPurchases(ctx context.Context, tenantID, storeID uuid.UUID
 		       COUNT(*) OVER()::int
 		FROM purchases pch
 		JOIN suppliers sp ON sp.id=pch.supplier_id AND sp.tenant_id=pch.tenant_id AND sp.store_id=pch.store_id
-		WHERE pch.tenant_id=$1 AND pch.store_id=$2 AND pch.created_at >= $3 AND pch.created_at < $4 + interval '1 day'
+		WHERE pch.tenant_id=$1 AND pch.store_id=$2 AND pch.created_at >= $3::timestamptz AND pch.created_at < ($4::timestamptz + interval '1 day')
 		  AND ($5='' OR pch.supplier_id=NULLIF($5,'')::uuid)
 		  AND ($6='%%' OR lower(sp.name) LIKE $6 OR lower(pch.id::text) LIKE $6)` + paymentFilter + `
 		ORDER BY pch.created_at DESC,pch.id DESC LIMIT $7 OFFSET $8`
