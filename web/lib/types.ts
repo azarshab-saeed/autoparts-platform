@@ -194,6 +194,10 @@ export type ReturnableLine = {
   id: string;
   product_id: string;
   title: string;
+  sku?: string;
+  brand?: string;
+  oem_code?: string;
+  barcode?: string;
   product_unit_id?: string;
   unit_code?: string;
   unit_name?: string;
@@ -220,7 +224,7 @@ export type ReturnableLine = {
 };
 export type SaleDetail = {
   id: string; customer_id?: string; customer_name?: string; warehouse_id: string;
-  gross_amount: number; discount_amount: number; net_amount?: number; taxable_amount?: number; exempt_amount?: number; tax_amount?: number; total_amount: number; paid_amount: number; due_amount: number; invoice_mode?: InvoiceMode; invoice_kind?: string; invoice_state?: string; invoice_number_display?: string; invoice_issued_at?: string; status: string; created_at: string; items: ReturnableLine[];
+  gross_amount: number; discount_amount: number; net_amount?: number; taxable_amount?: number; exempt_amount?: number; tax_amount?: number; total_amount: number; paid_amount: number; due_amount: number; invoice_mode?: InvoiceMode; invoice_kind?: string; invoice_state?: string; invoice_number_display?: string; invoice_issued_at?: string; status: string; created_at: string; document_template_id?:string; document_template_snapshot?:Record<string,unknown>; seller_snapshot?:Record<string,unknown>; buyer_snapshot?:Record<string,unknown>; items: ReturnableLine[];
 };
 export type PurchaseDetail = {
   id: string; supplier_id: string; supplier_name: string; warehouse_id: string;
@@ -558,3 +562,9 @@ export type EdgeDevice = {
   last_seen_at?: string;
   created_at: string;
 };
+
+export type DocumentTemplateKind = "sales_invoice"|"receipt_thermal"|"quotation"|"purchase_invoice"|"sales_return"|"payment_receipt"|"barcode_label";
+export type DocumentTemplateSettings = Record<string,string|number|boolean>;
+export type DocumentTemplate = { id:string; kind:DocumentTemplateKind; name:string; paper_size:string; is_default:boolean; active:boolean; settings:DocumentTemplateSettings };
+export type DocumentTemplateInput = Omit<DocumentTemplate,"id">;
+export type LabelCatalogItem = { product_id:string; product_title:string; sku?:string; brand?:string; oem_code?:string; product_unit_id:string; unit_code:string; unit_name:string; factor_to_base:number; barcode?:string; price:number };

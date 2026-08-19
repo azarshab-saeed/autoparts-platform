@@ -56,6 +56,9 @@ func (c *Cloud) PushSale(ctx context.Context, cfg Config, sale LocalSale) (Cloud
 	if sale.CustomerID != "" {
 		body["customer_id"] = sale.CustomerID
 	}
+	if sale.DocumentTemplateID != "" {
+		body["document_template_id"] = sale.DocumentTemplateID
+	}
 	status, err := c.doStatus(ctx, cfg.CloudURL+"/v1/edge/sales", "POST", cfg.DeviceID, cfg.DeviceSecret, body, &out)
 	return out, status, err
 }

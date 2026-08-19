@@ -159,15 +159,16 @@ func runAgent(ctx context.Context, serviceMode bool) error {
 	})
 	mux.HandleFunc("POST /v1/offline-sales", func(w http.ResponseWriter, r *http.Request) {
 		var in struct {
-			PaymentMethod string                    `json:"payment_method"`
-			CustomerID    string                    `json:"customer_id,omitempty"`
-			Items         []storeedge.LocalSaleItem `json:"items"`
+			PaymentMethod      string                    `json:"payment_method"`
+			CustomerID         string                    `json:"customer_id,omitempty"`
+			DocumentTemplateID string                    `json:"document_template_id,omitempty"`
+			Items              []storeedge.LocalSaleItem `json:"items"`
 		}
 		if err := decodeJSON(r, &in); err != nil {
 			writeError(w, http.StatusBadRequest, err)
 			return
 		}
-		out, err := store.QueueSale(in.PaymentMethod, in.CustomerID, in.Items)
+		out, err := store.QueueSale(in.PaymentMethod, in.CustomerID, in.Items, in.DocumentTemplateID)
 		if err != nil {
 			writeError(w, http.StatusConflict, err)
 			return

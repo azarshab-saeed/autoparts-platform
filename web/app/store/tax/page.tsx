@@ -63,7 +63,7 @@ export default function TaxPage(){
 
   return <div className="tax-page">
     <div className="page-head"><div><span className="eyebrow">Phase 15.14</span><h1>مالیات و فاکتور رسمی</h1><p>هویت فروشنده، نرخ‌های تاریخ‌دار، کد مالیاتی کالا، اطلاعات خریدار و آرشیو فاکتور رسمی.</p></div><div className="head-actions"><button className="ghost-btn" onClick={()=>void loadCore()} disabled={busy}>به‌روزرسانی</button><Link className="primary-btn" href="/store/sales">+ فروش جدید</Link></div></div>
-    <div className="tax-foundation-note"><b>Foundation مالیاتی فعال است</b><span>این فاز محاسبه، snapshot، شماره‌گذاری و چاپ داخلی را آماده می‌کند؛ ارسال و رهگیری سامانه مودیان در Phase 15.15 اضافه می‌شود.</span></div>
+    <div className="tax-foundation-note"><b>Foundation مالیاتی فعال است</b><span>این فاز محاسبه، snapshot، شماره‌گذاری و چاپ داخلی را آماده می‌کند؛ ارسال و رهگیری سامانه مودیان در Phase 15.16 اضافه می‌شود.</span></div>
     {success&&<div className="success-box tax-flash">{success}<button onClick={()=>setSuccess("")}>×</button></div>}{error&&<div className="error-box tax-flash">{error}<button onClick={()=>setError("")}>×</button></div>}
     <div className="segmented tax-tabs"><button className={tab==="settings"?"active":""} onClick={()=>setTab("settings")}>تنظیمات</button><button className={tab==="rates"?"active":""} onClick={()=>setTab("rates")}>نرخ‌ها</button><button className={tab==="products"?"active":""} onClick={()=>setTab("products")}>کالاها</button><button className={tab==="customers"?"active":""} onClick={()=>setTab("customers")}>مشتری‌ها</button><button className={tab==="invoices"?"active":""} onClick={()=>setTab("invoices")}>فاکتورها</button></div>
 

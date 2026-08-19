@@ -44,10 +44,10 @@ export async function getStoreEdgeStatus():Promise<StoreEdgeStatus>{
   return localRequest<StoreEdgeStatus>("/v1/status",{},900);
 }
 
-export async function queueOfflineSale(items:SaleItem[],paymentMethod:"cash"|"card",customerId?:string|null):Promise<StoreEdgeLocalSale>{
+export async function queueOfflineSale(items:SaleItem[],paymentMethod:"cash"|"card",customerId?:string|null,documentTemplateId?:string):Promise<StoreEdgeLocalSale>{
   return localRequest<StoreEdgeLocalSale>("/v1/offline-sales",{
     method:"POST",
-    body:JSON.stringify({payment_method:paymentMethod,customer_id:customerId||undefined,items:items.map(x=>({product_id:x.product.id,product_unit_id:x.unit.id,title:x.product.title,qty:x.qty,unit_price:x.unitPrice,manual_price:Boolean(x.manualPrice),preserve_price:true}))})
+    body:JSON.stringify({payment_method:paymentMethod,customer_id:customerId||undefined,document_template_id:documentTemplateId||undefined,items:items.map(x=>({product_id:x.product.id,product_unit_id:x.unit.id,title:x.product.title,qty:x.qty,unit_price:x.unitPrice,manual_price:Boolean(x.manualPrice),preserve_price:true}))})
   },2500);
 }
 
@@ -76,6 +76,7 @@ export async function getEdgeHardwareConfig():Promise<EdgeHardwareConfig>{return
 export async function saveEdgeHardwareConfig(cfg:EdgeHardwareConfig):Promise<EdgeHardwareConfig>{return localRequest<EdgeHardwareConfig>("/v1/hardware/config",{method:"PUT",body:JSON.stringify(cfg)},2500)}
 export async function getEdgeHardwareStatus():Promise<Record<string,unknown>>{return localRequest<Record<string,unknown>>("/v1/hardware/status",{},1400)}
 export async function printEdgeReceipt(input:{number:string;store_name?:string;created_at?:string;payment_method:string;total_amount:number;lines:{title:string;qty:number;unit_price:number}[]}):Promise<void>{await localRequest<{status:string}>("/v1/hardware/receipt/print",{method:"POST",body:JSON.stringify(input)},7000)}
-export async function printEdgeLabel(input:{title:string;sku?:string;barcode?:string;price?:number;copies?:number}):Promise<void>{await localRequest<{status:string}>("/v1/hardware/label/print",{method:"POST",body:JSON.stringify(input)},7000)}
+export type EdgeLabelTemplate={width_mm?:number;height_mm?:number;padding_mm?:number;barcode_height_mm?:number;name_font_size?:number;price_font_size?:number;show_product_name:boolean;show_sku:boolean;show_oem:boolean;show_brand:boolean;show_price:boolean;show_unit:boolean;show_pack_qty:boolean;show_store_name:boolean;show_barcode_text:boolean};
+export async function printEdgeLabel(input:{title:string;sku?:string;oem_code?:string;brand?:string;barcode?:string;price?:number;unit_name?:string;factor_to_base?:number;store_name?:string;copies?:number;template?:EdgeLabelTemplate}):Promise<void>{await localRequest<{status:string}>("/v1/hardware/label/print",{method:"POST",body:JSON.stringify(input)},7000)}
 export async function openEdgeCashDrawer():Promise<void>{await localRequest<{status:string}>("/v1/hardware/cash-drawer/open",{method:"POST",body:"{}"},5000)}
 export async function chargeEdgePOS(amount:number,reference:string):Promise<EdgePOSResult>{return localRequest<EdgePOSResult>("/v1/hardware/pos/charge",{method:"POST",body:JSON.stringify({amount,reference})},35000)}

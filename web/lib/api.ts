@@ -18,7 +18,7 @@ import type {
   SaleItem,
   SettlementResult,
   Supplier,
-  UserSession, NetworkSearchResult, NetworkStoreOffer, StoreNetworkProfile, NetworkReservation, NetworkReservationStatus, ReservationFulfillmentResult, Expense, ExpenseCategory, PartyStatement, ProfitLoss, CashReport, DailyClosing, DashboardSummary, InventoryInsightReport, PagedResult, PurchaseHistoryItem, SaleHistoryItem, NetworkProcurement, ProcurementReceiveResult, VehicleMake, ProductSearchMetadata, ProductSearchTerm, ProductFitmentInput, AuditLogEntry, ProductImportRow, ProductImportResult, EdgePairing, EdgeDevice, BankAccount, BankLedger, StoreCheck, CheckSummary, CheckDirection, CheckAction, MaturityAverageResult, FinanceIntelligenceDashboard, BankStatementInput, BankStatementImportResult, BankStatementLine, ReconciliationCandidate, ReconciliationMatch, PriceList, PricingSettings, PriceBreak, ProductPricing, PricingQuote, InvoiceMode, TaxSettings, TaxRate, TaxRateInput, TaxQuote, ProductTaxRow, InvoiceTaxListItem, OfficialInvoicePrintData, InvoiceAction
+  UserSession, NetworkSearchResult, NetworkStoreOffer, StoreNetworkProfile, NetworkReservation, NetworkReservationStatus, ReservationFulfillmentResult, Expense, ExpenseCategory, PartyStatement, ProfitLoss, CashReport, DailyClosing, DashboardSummary, InventoryInsightReport, PagedResult, PurchaseHistoryItem, SaleHistoryItem, NetworkProcurement, ProcurementReceiveResult, VehicleMake, ProductSearchMetadata, ProductSearchTerm, ProductFitmentInput, AuditLogEntry, ProductImportRow, ProductImportResult, EdgePairing, EdgeDevice, BankAccount, BankLedger, StoreCheck, CheckSummary, CheckDirection, CheckAction, MaturityAverageResult, FinanceIntelligenceDashboard, BankStatementInput, BankStatementImportResult, BankStatementLine, ReconciliationCandidate, ReconciliationMatch, PriceList, PricingSettings, PriceBreak, ProductPricing, PricingQuote, InvoiceMode, TaxSettings, TaxRate, TaxRateInput, TaxQuote, ProductTaxRow, InvoiceTaxListItem, OfficialInvoicePrintData, InvoiceAction, DocumentTemplate, DocumentTemplateInput, DocumentTemplateKind, LabelCatalogItem
 } from "./types";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
@@ -224,7 +224,7 @@ export async function searchSuppliers(q: string, session: UserSession): Promise<
   return out.items;
 }
 
-export async function postSale(session: UserSession, items: SaleItem[], customerId: string | null, paymentMethod: "cash"|"card"|"credit", payments?: PaymentPart[], invoiceMode: InvoiceMode = "normal") {
+export async function postSale(session: UserSession, items: SaleItem[], customerId: string | null, paymentMethod: "cash"|"card"|"credit", payments?: PaymentPart[], invoiceMode: InvoiceMode = "normal", documentTemplateId?: string) {
   if (MOCK_MODE) {
     await new Promise(r => setTimeout(r, 350));
     const total = items.reduce((s, i) => s + i.qty * i.unitPrice, 0);
@@ -241,6 +241,7 @@ export async function postSale(session: UserSession, items: SaleItem[], customer
       warehouse_id: session.warehouseId,
       customer_id: customerId,
       invoice_mode: invoiceMode,
+      ...(documentTemplateId ? { document_template_id: documentTemplateId } : {}),
       payment_method: paymentMethod,
       ...(payments ? { payments } : {}),
       items: items.map(i => ({ product_id: i.product.id, product_unit_id: i.unit.id, qty: i.qty, unit_price: i.unitPrice, ...(i.overrideReason ? { override_reason: i.overrideReason } : {}) }))
@@ -592,4 +593,22 @@ export async function getEdgeDevices(session:UserSession):Promise<EdgeDevice[]>{
 export async function revokeEdgeDevice(session:UserSession,id:string):Promise<void>{
   if(MOCK_MODE)return;
   await request<{status:string}>(`/v1/edge/devices/${encodeURIComponent(id)}/revoke`,{method:"POST"},session.token);
+}
+
+export async function getDocumentTemplates(session:UserSession,kind?:DocumentTemplateKind):Promise<DocumentTemplate[]>{
+  if(MOCK_MODE)return[];
+  const out=await request<{items:DocumentTemplate[]}>(`/v1/document-templates${kind?`?kind=${encodeURIComponent(kind)}`:""}`,{},session.token); return out.items;
+}
+export async function createDocumentTemplate(session:UserSession,input:DocumentTemplateInput):Promise<DocumentTemplate>{
+  return request<DocumentTemplate>("/v1/document-templates",{method:"POST",body:JSON.stringify(input)},session.token);
+}
+export async function updateDocumentTemplate(session:UserSession,id:string,input:DocumentTemplateInput):Promise<DocumentTemplate>{
+  return request<DocumentTemplate>(`/v1/document-templates/${id}`,{method:"PUT",body:JSON.stringify(input)},session.token);
+}
+export async function deleteDocumentTemplate(session:UserSession,id:string):Promise<void>{
+  await request<{status:string}>(`/v1/document-templates/${id}`,{method:"DELETE"},session.token);
+}
+export async function getLabelCatalog(session:UserSession,q="",limit=60):Promise<LabelCatalogItem[]>{
+  if(MOCK_MODE)return[];
+  const out=await request<{items:LabelCatalogItem[]}>(`/v1/print/label-catalog?q=${encodeURIComponent(q)}&limit=${limit}`,{},session.token); return out.items;
 }

@@ -1,6 +1,7 @@
 package sales
 
 import (
+	"encoding/json"
 	"time"
 
 	"github.com/google/uuid"
@@ -27,6 +28,7 @@ type CreateSaleCommand struct {
 	WarehouseID          uuid.UUID        `json:"warehouse_id"`
 	CustomerID           *uuid.UUID       `json:"customer_id,omitempty"`
 	InvoiceMode          string           `json:"invoice_mode,omitempty"`
+	DocumentTemplateID   *uuid.UUID       `json:"document_template_id,omitempty"`
 	PaymentMethod        string           `json:"payment_method,omitempty"` // legacy single-method input
 	Payments             []PaymentPart    `json:"payments,omitempty"`
 	IdempotencyKey       string           `json:"-"`
@@ -57,6 +59,10 @@ type SaleLine struct {
 	ID                  uuid.UUID  `json:"id"`
 	ProductID           uuid.UUID  `json:"product_id"`
 	Title               string     `json:"title"`
+	SKU                 *string    `json:"sku,omitempty"`
+	Brand               *string    `json:"brand,omitempty"`
+	OEMCode             *string    `json:"oem_code,omitempty"`
+	Barcode             *string    `json:"barcode,omitempty"`
 	ProductUnitID       *uuid.UUID `json:"product_unit_id,omitempty"`
 	UnitCode            string     `json:"unit_code"`
 	UnitName            string     `json:"unit_name"`
@@ -90,23 +96,27 @@ type SaleLine struct {
 }
 
 type SaleDetail struct {
-	ID                   uuid.UUID  `json:"id"`
-	CustomerID           *uuid.UUID `json:"customer_id,omitempty"`
-	CustomerName         string     `json:"customer_name,omitempty"`
-	WarehouseID          uuid.UUID  `json:"warehouse_id"`
-	GrossAmount          int64      `json:"gross_amount"`
-	DiscountAmount       int64      `json:"discount_amount"`
-	NetAmount            int64      `json:"net_amount"`
-	TaxableAmount        int64      `json:"taxable_amount"`
-	ExemptAmount         int64      `json:"exempt_amount"`
-	TaxAmount            int64      `json:"tax_amount"`
-	TotalAmount          int64      `json:"total_amount"`
-	PaidAmount           int64      `json:"paid_amount"`
-	DueAmount            int64      `json:"due_amount"`
-	InvoiceMode          string     `json:"invoice_mode"`
-	InvoiceState         string     `json:"invoice_state"`
-	InvoiceNumberDisplay string     `json:"invoice_number_display,omitempty"`
-	Status               string     `json:"status"`
-	CreatedAt            string     `json:"created_at"`
-	Items                []SaleLine `json:"items"`
+	ID                       uuid.UUID       `json:"id"`
+	CustomerID               *uuid.UUID      `json:"customer_id,omitempty"`
+	CustomerName             string          `json:"customer_name,omitempty"`
+	WarehouseID              uuid.UUID       `json:"warehouse_id"`
+	GrossAmount              int64           `json:"gross_amount"`
+	DiscountAmount           int64           `json:"discount_amount"`
+	NetAmount                int64           `json:"net_amount"`
+	TaxableAmount            int64           `json:"taxable_amount"`
+	ExemptAmount             int64           `json:"exempt_amount"`
+	TaxAmount                int64           `json:"tax_amount"`
+	TotalAmount              int64           `json:"total_amount"`
+	PaidAmount               int64           `json:"paid_amount"`
+	DueAmount                int64           `json:"due_amount"`
+	InvoiceMode              string          `json:"invoice_mode"`
+	InvoiceState             string          `json:"invoice_state"`
+	InvoiceNumberDisplay     string          `json:"invoice_number_display,omitempty"`
+	Status                   string          `json:"status"`
+	CreatedAt                string          `json:"created_at"`
+	DocumentTemplateID       *uuid.UUID      `json:"document_template_id,omitempty"`
+	DocumentTemplateSnapshot json.RawMessage `json:"document_template_snapshot,omitempty"`
+	SellerSnapshot           json.RawMessage `json:"seller_snapshot,omitempty"`
+	BuyerSnapshot            json.RawMessage `json:"buyer_snapshot,omitempty"`
+	Items                    []SaleLine      `json:"items"`
 }

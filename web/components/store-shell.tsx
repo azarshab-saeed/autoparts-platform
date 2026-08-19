@@ -25,6 +25,7 @@ const nav: NavItem[] = [
   {href:"/store/import",label:"ورود اطلاعات",icon:BoxIcon,group:"عملیات",roles:["owner","admin","warehouse"]},
   {href:"/store/edge",label:"فروش آفلاین / Edge",icon:SettingsIcon,group:"عملیات",roles:["owner","admin"]},
   {href:"/store/hardware",label:"چاپگر و سخت‌افزار",icon:SettingsIcon,group:"عملیات",roles:["owner","admin"]},
+  {href:"/store/documents",label:"طراحی فاکتور و بارکد",icon:SettingsIcon,group:"عملیات",roles:["owner","admin","cashier","warehouse","accountant"]},
   {href:"/store/network",label:"شبکه قطعات",icon:SearchIcon,group:"شبکه"},
   {href:"/store/procurement",label:"تأمین از شبکه",icon:BoxIcon,group:"شبکه",mobile:true},
   {href:"/store/orders",label:"سفارش‌های شبکه",icon:CartIcon,group:"شبکه",mobile:true},

@@ -42,6 +42,18 @@ func TestLabelZPLContainsBarcode(t *testing.T) {
 	}
 }
 
+func TestLabelZPLRespectsTemplate(t *testing.T) {
+	z := renderZPL(Label{Title: "Brake", SKU: "BRK", OEMCode: "OEM-9", Barcode: "626123", Price: 100, UnitName: "Carton", FactorToBase: 12, Template: LabelTemplate{WidthMM: 60, HeightMM: 40, PaddingMM: 3, BarcodeHeightMM: 12, ShowSKU: true, ShowOEM: true, ShowUnit: true, ShowPackQty: true, ShowPrice: true, ShowBarcodeText: true}})
+	if !strings.Contains(z, "^PW480") || !strings.Contains(z, "^LL320") {
+		t.Fatalf("template size not applied: %s", z)
+	}
+	for _, want := range []string{"SKU: BRK", "OEM: OEM-9", "Unit: Carton", "Pack: 12", "Price: 100", "626123"} {
+		if !strings.Contains(z, want) {
+			t.Fatalf("missing %q in zpl: %s", want, z)
+		}
+	}
+}
+
 func TestPOSManualRequiresOperator(t *testing.T) {
 	s, err := Open(t.TempDir())
 	if err != nil {

@@ -26,10 +26,11 @@ func TestPushSaleCarriesCustomerAndStripsLocalPricingFlags(t *testing.T) {
 
 	cloud := NewCloud()
 	sale := LocalSale{
-		LocalOperationID: "local-1",
-		CreatedAt:        time.Now(),
-		PaymentMethod:    "cash",
-		CustomerID:       "customer-123",
+		LocalOperationID:   "local-1",
+		CreatedAt:          time.Now(),
+		PaymentMethod:      "cash",
+		CustomerID:         "customer-123",
+		DocumentTemplateID: "template-123",
 		Items: []LocalSaleItem{{
 			ProductID: "p1", ProductUnitID: "unit-carton", Title: "Brake", Qty: 6, UnitPrice: 85,
 			ManualPrice: true, PreservePrice: true,
@@ -44,6 +45,9 @@ func TestPushSaleCarriesCustomerAndStripsLocalPricingFlags(t *testing.T) {
 	}
 	if got, _ := body["customer_id"].(string); got != "customer-123" {
 		t.Fatalf("customer_id=%q want customer-123", got)
+	}
+	if got, _ := body["document_template_id"].(string); got != "template-123" {
+		t.Fatalf("document_template_id=%q want template-123", got)
 	}
 	items, ok := body["items"].([]any)
 	if !ok || len(items) != 1 {

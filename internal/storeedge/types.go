@@ -75,18 +75,19 @@ type LocalSaleItem struct {
 }
 
 type LocalSale struct {
-	LocalOperationID string          `json:"local_operation_id"`
-	LocalNumber      string          `json:"local_number"`
-	CreatedAt        time.Time       `json:"created_at"`
-	PaymentMethod    string          `json:"payment_method"`
-	CustomerID       string          `json:"customer_id,omitempty"`
-	Items            []LocalSaleItem `json:"items"`
-	TotalAmount      int64           `json:"total_amount"`
-	Status           string          `json:"status"`
-	ServerSaleID     string          `json:"server_sale_id,omitempty"`
-	LastError        string          `json:"last_error,omitempty"`
-	Attempts         int             `json:"attempts"`
-	LastAttemptAt    *time.Time      `json:"last_attempt_at,omitempty"`
+	LocalOperationID   string          `json:"local_operation_id"`
+	LocalNumber        string          `json:"local_number"`
+	CreatedAt          time.Time       `json:"created_at"`
+	PaymentMethod      string          `json:"payment_method"`
+	CustomerID         string          `json:"customer_id,omitempty"`
+	DocumentTemplateID string          `json:"document_template_id,omitempty"`
+	Items              []LocalSaleItem `json:"items"`
+	TotalAmount        int64           `json:"total_amount"`
+	Status             string          `json:"status"`
+	ServerSaleID       string          `json:"server_sale_id,omitempty"`
+	LastError          string          `json:"last_error,omitempty"`
+	Attempts           int             `json:"attempts"`
+	LastAttemptAt      *time.Time      `json:"last_attempt_at,omitempty"`
 }
 
 type State struct {

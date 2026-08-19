@@ -197,7 +197,7 @@ func derivedUnitPrice(basePrice int64, factor float64) (int64, error) {
 	return int64(math.Round(v)), nil
 }
 
-func (s *Store) QueueSale(paymentMethod, customerID string, items []LocalSaleItem) (LocalSale, error) {
+func (s *Store) QueueSale(paymentMethod, customerID string, items []LocalSaleItem, documentTemplateID ...string) (LocalSale, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.config.DeviceID == "" {
@@ -283,15 +283,20 @@ func (s *Store) QueueSale(paymentMethod, customerID string, items []LocalSaleIte
 	if err != nil {
 		return LocalSale{}, err
 	}
+	templateID := ""
+	if len(documentTemplateID) > 0 {
+		templateID = strings.TrimSpace(documentTemplateID[0])
+	}
 	sale := LocalSale{
-		LocalOperationID: id,
-		LocalNumber:      fmt.Sprintf("LOCAL-%s-%06d", now.Format("20060102"), s.state.Sequence),
-		CreatedAt:        now,
-		PaymentMethod:    paymentMethod,
-		CustomerID:       strings.TrimSpace(customerID),
-		Items:            items,
-		TotalAmount:      total,
-		Status:           "pending",
+		LocalOperationID:   id,
+		LocalNumber:        fmt.Sprintf("LOCAL-%s-%06d", now.Format("20060102"), s.state.Sequence),
+		CreatedAt:          now,
+		PaymentMethod:      paymentMethod,
+		CustomerID:         strings.TrimSpace(customerID),
+		DocumentTemplateID: templateID,
+		Items:              items,
+		TotalAmount:        total,
+		Status:             "pending",
 	}
 	s.state.Sales = append(s.state.Sales, sale)
 	if err := s.persistStateLocked(); err != nil {

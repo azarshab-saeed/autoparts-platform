@@ -61,12 +61,36 @@ type Receipt struct {
 	Lines         []ReceiptLine `json:"lines"`
 }
 
+type LabelTemplate struct {
+	WidthMM         float64 `json:"width_mm,omitempty"`
+	HeightMM        float64 `json:"height_mm,omitempty"`
+	PaddingMM       float64 `json:"padding_mm,omitempty"`
+	BarcodeHeightMM float64 `json:"barcode_height_mm,omitempty"`
+	NameFontSize    int     `json:"name_font_size,omitempty"`
+	PriceFontSize   int     `json:"price_font_size,omitempty"`
+	ShowProductName bool    `json:"show_product_name"`
+	ShowSKU         bool    `json:"show_sku"`
+	ShowOEM         bool    `json:"show_oem"`
+	ShowBrand       bool    `json:"show_brand"`
+	ShowPrice       bool    `json:"show_price"`
+	ShowUnit        bool    `json:"show_unit"`
+	ShowPackQty     bool    `json:"show_pack_qty"`
+	ShowStoreName   bool    `json:"show_store_name"`
+	ShowBarcodeText bool    `json:"show_barcode_text"`
+}
+
 type Label struct {
-	Title   string `json:"title"`
-	SKU     string `json:"sku,omitempty"`
-	Barcode string `json:"barcode,omitempty"`
-	Price   int64  `json:"price,omitempty"`
-	Copies  int    `json:"copies,omitempty"`
+	Title        string        `json:"title"`
+	SKU          string        `json:"sku,omitempty"`
+	OEMCode      string        `json:"oem_code,omitempty"`
+	Brand        string        `json:"brand,omitempty"`
+	Barcode      string        `json:"barcode,omitempty"`
+	Price        int64         `json:"price,omitempty"`
+	UnitName     string        `json:"unit_name,omitempty"`
+	FactorToBase float64       `json:"factor_to_base,omitempty"`
+	StoreName    string        `json:"store_name,omitempty"`
+	Copies       int           `json:"copies,omitempty"`
+	Template     LabelTemplate `json:"template,omitempty"`
 }
 
 type POSCharge struct {
@@ -478,13 +502,139 @@ func renderReceiptText(r Receipt) string {
 	return b.String()
 }
 func renderLabelText(l Label) string {
-	return fmt.Sprintf("%s\nSKU: %s\nBarcode: %s\nPrice: %d\n", l.Title, l.SKU, l.Barcode, l.Price)
+	var b strings.Builder
+	t := normalizedLabelTemplate(l.Template)
+	if t.ShowStoreName && l.StoreName != "" {
+		fmt.Fprintf(&b, "%s\n", l.StoreName)
+	}
+	if t.ShowProductName {
+		fmt.Fprintf(&b, "%s\n", l.Title)
+	}
+	if t.ShowSKU && l.SKU != "" {
+		fmt.Fprintf(&b, "SKU: %s\n", l.SKU)
+	}
+	if t.ShowOEM && l.OEMCode != "" {
+		fmt.Fprintf(&b, "OEM: %s\n", l.OEMCode)
+	}
+	if t.ShowBrand && l.Brand != "" {
+		fmt.Fprintf(&b, "Brand: %s\n", l.Brand)
+	}
+	if t.ShowUnit && l.UnitName != "" {
+		fmt.Fprintf(&b, "Unit: %s\n", l.UnitName)
+	}
+	if t.ShowPackQty && l.FactorToBase > 1 {
+		fmt.Fprintf(&b, "Pack: %.3g base units\n", l.FactorToBase)
+	}
+	if t.ShowPrice {
+		fmt.Fprintf(&b, "Price: %d\n", l.Price)
+	}
+	if l.Barcode != "" {
+		fmt.Fprintf(&b, "Barcode: %s\n", l.Barcode)
+	}
+	return b.String()
+}
+func normalizedLabelTemplate(in LabelTemplate) LabelTemplate {
+	if in.WidthMM <= 0 {
+		in.WidthMM = 50
+	}
+	if in.HeightMM <= 0 {
+		in.HeightMM = 30
+	}
+	if in.PaddingMM < 0 || in.PaddingMM > 10 {
+		in.PaddingMM = 2
+	}
+	if in.BarcodeHeightMM <= 0 {
+		in.BarcodeHeightMM = 10
+	}
+	if in.NameFontSize <= 0 {
+		in.NameFontSize = 10
+	}
+	if in.PriceFontSize <= 0 {
+		in.PriceFontSize = 12
+	}
+	if in.WidthMM < 20 {
+		in.WidthMM = 20
+	}
+	if in.WidthMM > 120 {
+		in.WidthMM = 120
+	}
+	if in.HeightMM < 15 {
+		in.HeightMM = 15
+	}
+	if in.HeightMM > 100 {
+		in.HeightMM = 100
+	}
+	if !in.ShowProductName && !in.ShowSKU && !in.ShowOEM && !in.ShowBrand && !in.ShowPrice && !in.ShowUnit && !in.ShowPackQty && !in.ShowStoreName && !in.ShowBarcodeText {
+		in.ShowProductName = true
+		in.ShowSKU = true
+		in.ShowPrice = true
+		in.ShowUnit = true
+		in.ShowBarcodeText = true
+	}
+	return in
 }
 func renderZPL(l Label) string {
-	title := zplEscape(l.Title)
-	sku := zplEscape(l.SKU)
-	barcode := zplEscape(l.Barcode)
-	return fmt.Sprintf("^XA^CI28^PW600^LL320^FO30,30^A0N,32,32^FD%s^FS^FO30,80^A0N,26,26^FDSKU: %s^FS^FO30,125^A0N,28,28^FDPrice: %d^FS^FO30,170^BY2^BCN,80,Y,N,N^FD%s^FS^XZ", title, sku, l.Price, barcode)
+	t := normalizedLabelTemplate(l.Template)
+	dots := func(mm float64) int { return int(mm*8 + 0.5) }
+	w, h, pad := dots(t.WidthMM), dots(t.HeightMM), dots(t.PaddingMM)
+	y := pad
+	line := 24
+	var b strings.Builder
+	fmt.Fprintf(&b, "^XA^CI28^PW%d^LL%d", w, h)
+	add := func(text string, size int) {
+		if text == "" {
+			return
+		}
+		if size < 18 {
+			size = 18
+		}
+		fmt.Fprintf(&b, "^FO%d,%d^A0N,%d,%d^FD%s^FS", pad, y, size, size, zplEscape(text))
+		y += size + 6
+	}
+	if t.ShowStoreName {
+		add(l.StoreName, line)
+	}
+	if t.ShowProductName {
+		add(l.Title, maxInt(20, t.NameFontSize*2))
+	}
+	if t.ShowSKU && l.SKU != "" {
+		add("SKU: "+l.SKU, line)
+	}
+	if t.ShowOEM && l.OEMCode != "" {
+		add("OEM: "+l.OEMCode, line)
+	}
+	if t.ShowBrand && l.Brand != "" {
+		add("Brand: "+l.Brand, line)
+	}
+	if t.ShowUnit && l.UnitName != "" {
+		add("Unit: "+l.UnitName, line)
+	}
+	if t.ShowPackQty && l.FactorToBase > 1 {
+		add(fmt.Sprintf("Pack: %.3g", l.FactorToBase), line)
+	}
+	if t.ShowPrice {
+		add(fmt.Sprintf("Price: %d", l.Price), maxInt(22, t.PriceFontSize*2))
+	}
+	if l.Barcode != "" && y < h-35 {
+		bh := dots(t.BarcodeHeightMM)
+		if bh < 35 {
+			bh = 35
+		}
+		if y+bh > h-10 {
+			bh = h - y - 10
+		}
+		if bh > 20 {
+			fmt.Fprintf(&b, "^FO%d,%d^BY2^BCN,%d,%s,N,N^FD%s^FS", pad, y, bh, map[bool]string{true: "Y", false: "N"}[t.ShowBarcodeText], zplEscape(l.Barcode))
+		}
+	}
+	b.WriteString("^XZ")
+	return b.String()
+}
+func maxInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }
 func zplEscape(v string) string { return strings.NewReplacer("^", " ", "~", " ").Replace(v) }
 func paymentLabel(v string) string {

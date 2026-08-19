@@ -12,9 +12,9 @@ The goal is not merely to reproduce Holoo accounting screens. The goal is to rem
 
 ## Current checkpoint
 
-- **Latest completed product checkpoint:** Phase 15.14 — Tax, VAT & Official Invoicing Foundation
-- **Next product phase:** **Phase 15.15 — Iranian Modian Integration**
-- Phase 15.15 should remain the next phase unless a verified blocker makes it impossible to implement safely.
+- **Latest completed product checkpoint:** Phase 15.15 — Invoice Designer, Document Templates & Barcode Label Printing
+- **Next product phase:** **Phase 15.16 — Iranian Modian Integration**
+- Phase 15.16 should remain the next phase unless a verified blocker makes it impossible to implement safely.
 - Build/dependency/release hardening tasks are important, but they do **not** replace this product roadmap. They should be handled as blocking fixes, maintenance slices, or release gates unless they materially change product capability.
 
 ---
@@ -41,7 +41,7 @@ We should not spend the roadmap trying to win only by copying a mature accountin
 
 ---
 
-## Competitive status after Phase 15.14
+## Competitive status after Phase 15.15
 
 | Area | Current status | Strategic position |
 |---|---|---|
@@ -75,7 +75,8 @@ We should not spend the roadmap trying to win only by copying a mature accountin
 | Future check cash-flow / customer risk | **Implemented in 15.13** | Forward-looking management advantage |
 | Tax/VAT and official invoicing | **Implemented foundation in 15.14** | Local calculation, accounting, snapshots and official document blocker substantially closed |
 | Iranian Modian integration | **Missing** | Major migration blocker |
-| Advanced invoice/document designer | **Missing** | Important operational gap |
+| Advanced invoice/document designer | **Implemented in 15.15** | Multiple safe templates + immutable sale snapshot |
+| Barcode label template designer | **Implemented in 15.15** | Multi-unit labels, batch printing and Store Edge/ZPL |
 | User performance / anomaly intelligence | Limited | Opportunity to exceed traditional software |
 
 ---
@@ -326,9 +327,38 @@ Tax behavior must be configuration/version based. Historical invoices must not r
 
 ---
 
-## Phase 15.15 — Iranian Modian Integration
+## Phase 15.15 — Invoice Designer, Document Templates & Barcode Label Printing
 
-**Status:** PLANNED
+**Status:** DONE
+
+### Objective
+
+Remove document-layout and barcode-label printing as migration blockers before external Modian integration.
+
+### Delivered
+
+- tenant/store-scoped document templates with safe, structured settings rather than arbitrary HTML;
+- configurable template kinds for sales invoices, thermal receipts, quotations, purchases, sales returns, payment receipts and barcode labels;
+- A4/receipt/custom paper settings, logo URL/data-URL, store identity switches, customer/tax identity, SKU/OEM/brand/barcode/unit/discount/tax/payment visibility, editable column captions, header/footer/terms and signature areas;
+- live preview and browser Print/Save as PDF workflow;
+- default-template management plus duplicate/edit/delete controls with audit through the existing mutation audit middleware;
+- POS users can select an active sales/thermal template; the server scopes it to the same tenant/store and snapshots it at posting time, so later template edits do not rewrite historical invoice appearance;
+- printable sales invoice consumes the stored snapshot and keeps internal pricing/margin audit out of the customer print;
+- barcode label templates with width/height/padding/barcode height and field visibility controls;
+- multi-unit label catalog: piece/pair/set/pack/carton barcodes and derived/default retail price per commercial unit;
+- batch label quantities, configurable sheet columns/gaps and browser sheet/PDF printing;
+- direct Store Edge label printing with template-aware ZPL rendering and unit/package metadata; selected sale template identity is also preserved through offline Store Edge sync;
+- EAN-13 browser preview plus a deterministic fallback visual for non-EAN identifiers.
+
+### Constraint
+
+The designer intentionally remains block/configuration based. It does not store executable HTML/JavaScript and is not a free-form desktop-publishing engine.
+
+---
+
+## Phase 15.16 — Iranian Modian Integration
+
+**Status:** NEXT
 
 ### Objective
 
@@ -357,35 +387,6 @@ Expected product capabilities:
 ### Architecture rule
 
 The sale posting transaction must not depend on synchronous external Modian availability. Use a durable outbox/submission workflow so the store can continue operating during external outages.
-
----
-
-## Phase 15.16 — Invoice Designer & Store Documents
-
-**Status:** PLANNED
-
-### Objective
-
-Give stores enough document flexibility that printer/layout habits are no longer a migration blocker.
-
-### Scope
-
-- multiple document templates;
-- A4 and receipt-oriented layouts;
-- logo/store identity;
-- configurable visible columns;
-- optional OEM/vehicle/barcode/discount/tax fields;
-- header/footer notes;
-- stamp/signature areas;
-- official vs normal invoice templates;
-- sales, purchase, return and settlement document coverage where relevant;
-- preview before print;
-- printer-friendly deterministic output;
-- permissioned template management.
-
-### Constraint
-
-Avoid turning the application into a free-form desktop publishing tool. Prefer safe configurable templates/blocks with deterministic print output.
 
 ---
 
@@ -491,8 +492,9 @@ Unless this document is intentionally revised, continue in this order:
 15.12   Multi-Unit & Packaging + Product Wizard   DONE
 15.13   Bank Reconciliation & Check Intelligence  DONE
 15.14   Tax, VAT & Official Invoicing Foundation  DONE
-15.15   Iranian Modian Integration                NEXT
-15.16   Invoice Designer & Store Documents        PLANNED
+15.14.1 Tax invoice date-range SQL hotfix          DONE
+15.15   Invoice Designer + Barcode Label Printing DONE
+15.16   Iranian Modian Integration                NEXT
 15.17   Management Intelligence & User Performance PLANNED
 ```
 

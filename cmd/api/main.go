@@ -16,6 +16,7 @@ import (
 
 	"github.com/example/autoparts-core/internal/catalog"
 	"github.com/example/autoparts-core/internal/customers"
+	"github.com/example/autoparts-core/internal/documents"
 	"github.com/example/autoparts-core/internal/edge"
 	"github.com/example/autoparts-core/internal/finance"
 	"github.com/example/autoparts-core/internal/fitment"
@@ -46,7 +47,7 @@ var (
 	buildTime = "unknown"
 )
 
-const latestMigration = "019_tax_official_invoicing.sql"
+const latestMigration = "020_document_templates_barcode_labels.sql"
 
 func main() {
 	log.SetFlags(0)
@@ -77,6 +78,7 @@ func main() {
 	networkSvc := network.NewService(pool)
 	financeSvc := finance.NewService(pool)
 	taxService := taxsvc.NewService(pool)
+	documentSvc := documents.NewService(pool)
 	fitmentSvc := fitment.NewService(pool)
 	returnSvc := returnsvc.NewService(pool)
 	reservationSvc := reservations.NewService(pool)
@@ -599,6 +601,72 @@ func main() {
 			return
 		}
 		api.WriteJSON(w, http.StatusCreated, out)
+	})))
+
+	protected.Handle("GET /v1/document-templates", auth.RequireRoles("owner", "admin", "cashier", "warehouse", "accountant")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, _ := auth.ClaimsFrom(r.Context())
+		items, err := documentSvc.List(r.Context(), c.TenantID, c.StoreID, r.URL.Query().Get("kind"))
+		if err != nil {
+			api.WriteError(w, api.BadRequest("document_templates_failed", err.Error()))
+			return
+		}
+		api.WriteJSON(w, http.StatusOK, map[string]any{"items": items})
+	})))
+	protected.Handle("POST /v1/document-templates", auth.RequireRoles("owner", "admin")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, _ := auth.ClaimsFrom(r.Context())
+		var in documents.TemplateInput
+		if err := decodeJSON(r, &in); err != nil {
+			api.WriteError(w, err)
+			return
+		}
+		out, err := documentSvc.Create(r.Context(), c.TenantID, c.StoreID, in)
+		if err != nil {
+			api.WriteError(w, api.Conflict("document_template_create_failed", err.Error()))
+			return
+		}
+		api.WriteJSON(w, http.StatusCreated, out)
+	})))
+	protected.Handle("PUT /v1/document-templates/{id}", auth.RequireRoles("owner", "admin")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, _ := auth.ClaimsFrom(r.Context())
+		id, err := uuid.Parse(r.PathValue("id"))
+		if err != nil {
+			api.WriteError(w, api.BadRequest("invalid_template_id", "template id must be a UUID"))
+			return
+		}
+		var in documents.TemplateInput
+		if err := decodeJSON(r, &in); err != nil {
+			api.WriteError(w, err)
+			return
+		}
+		out, err := documentSvc.Update(r.Context(), c.TenantID, c.StoreID, id, in)
+		if err != nil {
+			api.WriteError(w, api.Conflict("document_template_update_failed", err.Error()))
+			return
+		}
+		api.WriteJSON(w, http.StatusOK, out)
+	})))
+	protected.Handle("DELETE /v1/document-templates/{id}", auth.RequireRoles("owner", "admin")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, _ := auth.ClaimsFrom(r.Context())
+		id, err := uuid.Parse(r.PathValue("id"))
+		if err != nil {
+			api.WriteError(w, api.BadRequest("invalid_template_id", "template id must be a UUID"))
+			return
+		}
+		if err := documentSvc.Delete(r.Context(), c.TenantID, c.StoreID, id); err != nil {
+			api.WriteError(w, api.Conflict("document_template_delete_failed", err.Error()))
+			return
+		}
+		api.WriteJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+	})))
+	protected.Handle("GET /v1/print/label-catalog", auth.RequireRoles("owner", "admin", "cashier", "warehouse")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, _ := auth.ClaimsFrom(r.Context())
+		limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+		items, err := documentSvc.LabelCatalog(r.Context(), c.TenantID, c.StoreID, r.URL.Query().Get("q"), limit)
+		if err != nil {
+			api.WriteError(w, api.Conflict("label_catalog_failed", err.Error()))
+			return
+		}
+		api.WriteJSON(w, http.StatusOK, map[string]any{"items": items})
 	})))
 
 	protected.Handle("PUT /v1/customers/{id}/price-list", auth.RequireRoles("owner", "admin")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1806,11 +1874,12 @@ func main() {
 			return
 		}
 		var in struct {
-			LocalOperationID string     `json:"local_operation_id"`
-			OccurredAt       time.Time  `json:"occurred_at"`
-			PaymentMethod    string     `json:"payment_method"`
-			CustomerID       *uuid.UUID `json:"customer_id,omitempty"`
-			Items            []struct {
+			LocalOperationID   string     `json:"local_operation_id"`
+			OccurredAt         time.Time  `json:"occurred_at"`
+			PaymentMethod      string     `json:"payment_method"`
+			CustomerID         *uuid.UUID `json:"customer_id,omitempty"`
+			DocumentTemplateID *uuid.UUID `json:"document_template_id,omitempty"`
+			Items              []struct {
 				ProductID     uuid.UUID  `json:"product_id"`
 				ProductUnitID *uuid.UUID `json:"product_unit_id,omitempty"`
 				Qty           float64    `json:"qty"`
@@ -1840,7 +1909,7 @@ func main() {
 		if occurred.IsZero() {
 			occurred = time.Now()
 		}
-		cmd := sales.CreateSaleCommand{TenantID: d.TenantID, StoreID: d.StoreID, ActorRole: "edge", WarehouseID: d.WarehouseID, CustomerID: in.CustomerID, PaymentMethod: in.PaymentMethod, IdempotencyKey: "edge:" + d.ID.String() + ":" + localID, Source: "edge", EdgeDeviceID: &deviceID, EdgeLocalOperationID: localID, EdgeOccurredAt: &occurred, Items: items}
+		cmd := sales.CreateSaleCommand{TenantID: d.TenantID, StoreID: d.StoreID, ActorRole: "edge", WarehouseID: d.WarehouseID, CustomerID: in.CustomerID, DocumentTemplateID: in.DocumentTemplateID, PaymentMethod: in.PaymentMethod, IdempotencyKey: "edge:" + d.ID.String() + ":" + localID, Source: "edge", EdgeDeviceID: &deviceID, EdgeLocalOperationID: localID, EdgeOccurredAt: &occurred, Items: items}
 		out, err := salesSvc.Create(r.Context(), cmd)
 		if err != nil {
 			_ = edgeSvc.RecordSync(r.Context(), d, localID, nil, "conflict", err.Error())

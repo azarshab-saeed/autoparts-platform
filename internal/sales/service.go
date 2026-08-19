@@ -212,7 +212,11 @@ func (s *Service) Create(ctx context.Context, cmd CreateSaleCommand) (Sale, erro
 	}
 	sellerSnapshot, _ := json.Marshal(taxQuote.SellerSnapshot)
 	buyerSnapshot, _ := json.Marshal(taxQuote.BuyerSnapshot)
-	_, err = tx.Exec(ctx, `INSERT INTO sales(id,tenant_id,store_id,warehouse_id,customer_id,status,gross_amount,discount_amount,net_amount,taxable_amount,exempt_amount,tax_amount,total_amount,paid_amount,due_amount,idempotency_key,source,edge_device_id,edge_local_operation_id,edge_occurred_at,invoice_mode,invoice_state,invoice_series,invoice_number,invoice_number_display,invoice_issued_at,seller_snapshot,buyer_snapshot,tax_calculation_mode) VALUES($1,$2,$3,$4,$5,'posted',$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,NULLIF($22,''),$23,NULLIF($24,''),$25,$26,$27,$28)`, saleID, cmd.TenantID, cmd.StoreID, cmd.WarehouseID, cmd.CustomerID, grossTotal, discountTotal, taxQuote.NetAmount, taxQuote.TaxableAmount, taxQuote.ExemptAmount, taxQuote.TaxAmount, taxQuote.TotalAmount, paid, due, cmd.IdempotencyKey, cmd.Source, cmd.EdgeDeviceID, strings.TrimSpace(cmd.EdgeLocalOperationID), cmd.EdgeOccurredAt, taxQuote.InvoiceMode, invoiceState, invoiceSeries, invoiceNumber, invoiceNumberDisplay, invoiceIssuedAt, sellerSnapshot, buyerSnapshot, taxQuote.CalculationMode)
+	documentTemplateID, documentTemplateSnapshot, err := documentTemplateSnapshot(ctx, tx, cmd.TenantID, cmd.StoreID, cmd.DocumentTemplateID)
+	if err != nil {
+		return Sale{}, err
+	}
+	_, err = tx.Exec(ctx, `INSERT INTO sales(id,tenant_id,store_id,warehouse_id,customer_id,status,gross_amount,discount_amount,net_amount,taxable_amount,exempt_amount,tax_amount,total_amount,paid_amount,due_amount,idempotency_key,source,edge_device_id,edge_local_operation_id,edge_occurred_at,invoice_mode,invoice_state,invoice_series,invoice_number,invoice_number_display,invoice_issued_at,seller_snapshot,buyer_snapshot,tax_calculation_mode,document_template_id,document_template_snapshot) VALUES($1,$2,$3,$4,$5,'posted',$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,NULLIF($22,''),$23,NULLIF($24,''),$25,$26,$27,$28,$29,$30::jsonb)`, saleID, cmd.TenantID, cmd.StoreID, cmd.WarehouseID, cmd.CustomerID, grossTotal, discountTotal, taxQuote.NetAmount, taxQuote.TaxableAmount, taxQuote.ExemptAmount, taxQuote.TaxAmount, taxQuote.TotalAmount, paid, due, cmd.IdempotencyKey, cmd.Source, cmd.EdgeDeviceID, strings.TrimSpace(cmd.EdgeLocalOperationID), cmd.EdgeOccurredAt, taxQuote.InvoiceMode, invoiceState, invoiceSeries, invoiceNumber, invoiceNumberDisplay, invoiceIssuedAt, sellerSnapshot, buyerSnapshot, taxQuote.CalculationMode, documentTemplateID, documentTemplateSnapshot)
 	if err != nil {
 		return Sale{}, err
 	}
@@ -397,7 +401,7 @@ func saleBreakPrice(ctx context.Context, tx pgx.Tx, tenantID, storeID, productID
 func (s *Service) Detail(ctx context.Context, tenantID, storeID, saleID uuid.UUID) (SaleDetail, error) {
 	var out SaleDetail
 	var created time.Time
-	err := s.db.QueryRow(ctx, `SELECT s.id,s.customer_id,COALESCE(c.name,''),s.warehouse_id,s.gross_amount,s.discount_amount,s.net_amount,s.taxable_amount,s.exempt_amount,s.tax_amount,s.total_amount,s.paid_amount,s.due_amount,s.invoice_mode,s.invoice_state,COALESCE(s.invoice_number_display,''),s.status,s.created_at FROM sales s LEFT JOIN customers c ON c.id=s.customer_id WHERE s.id=$1 AND s.tenant_id=$2 AND s.store_id=$3`, saleID, tenantID, storeID).Scan(&out.ID, &out.CustomerID, &out.CustomerName, &out.WarehouseID, &out.GrossAmount, &out.DiscountAmount, &out.NetAmount, &out.TaxableAmount, &out.ExemptAmount, &out.TaxAmount, &out.TotalAmount, &out.PaidAmount, &out.DueAmount, &out.InvoiceMode, &out.InvoiceState, &out.InvoiceNumberDisplay, &out.Status, &created)
+	err := s.db.QueryRow(ctx, `SELECT s.id,s.customer_id,COALESCE(c.name,''),s.warehouse_id,s.gross_amount,s.discount_amount,s.net_amount,s.taxable_amount,s.exempt_amount,s.tax_amount,s.total_amount,s.paid_amount,s.due_amount,s.invoice_mode,s.invoice_state,COALESCE(s.invoice_number_display,''),s.status,s.created_at,s.document_template_id,s.document_template_snapshot,s.seller_snapshot,s.buyer_snapshot FROM sales s LEFT JOIN customers c ON c.id=s.customer_id WHERE s.id=$1 AND s.tenant_id=$2 AND s.store_id=$3`, saleID, tenantID, storeID).Scan(&out.ID, &out.CustomerID, &out.CustomerName, &out.WarehouseID, &out.GrossAmount, &out.DiscountAmount, &out.NetAmount, &out.TaxableAmount, &out.ExemptAmount, &out.TaxAmount, &out.TotalAmount, &out.PaidAmount, &out.DueAmount, &out.InvoiceMode, &out.InvoiceState, &out.InvoiceNumberDisplay, &out.Status, &created, &out.DocumentTemplateID, &out.DocumentTemplateSnapshot, &out.SellerSnapshot, &out.BuyerSnapshot)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return SaleDetail{}, errors.New("sale not found")
 	}
@@ -405,7 +409,7 @@ func (s *Service) Detail(ctx context.Context, tenantID, storeID, saleID uuid.UUI
 		return SaleDetail{}, err
 	}
 	out.CreatedAt = created.Format(time.RFC3339)
-	rows, err := s.db.Query(ctx, `SELECT si.id,si.product_id,p.title,si.product_unit_id,COALESCE(si.commercial_unit_code,p.unit),COALESCE(si.commercial_unit_name,p.unit),si.conversion_factor::float8,COALESCE(si.commercial_qty,si.qty)::float8,si.qty::float8,COALESCE(SUM(sri.qty),0)::float8/NULLIF(si.conversion_factor,0),GREATEST(si.qty-COALESCE(SUM(sri.qty),0),0)::float8/NULLIF(si.conversion_factor,0),si.unit_price,si.unit_cost,si.line_total,si.gross_line_total,si.discount_amount,si.price_list_id,si.list_unit_price,si.price_source,si.price_override,si.override_reason,si.override_actor_user_id,si.margin_bps,si.margin_guard_bps,si.below_margin_guard,si.tax_category,si.tax_code,si.tax_rate_name,si.tax_rate_bps,si.tax_base_amount,si.tax_amount,si.total_with_tax,si.tax_exemption_reason FROM sale_items si JOIN products p ON p.id=si.product_id LEFT JOIN sales_return_items sri ON sri.sale_item_id=si.id WHERE si.tenant_id=$1 AND si.sale_id=$2 GROUP BY si.id,p.title,p.unit ORDER BY si.created_at`, tenantID, saleID)
+	rows, err := s.db.Query(ctx, `SELECT si.id,si.product_id,p.title,p.sku,p.brand,p.oem_code,COALESCE(pu.barcode,p.barcode),si.product_unit_id,COALESCE(si.commercial_unit_code,p.unit),COALESCE(si.commercial_unit_name,p.unit),si.conversion_factor::float8,COALESCE(si.commercial_qty,si.qty)::float8,si.qty::float8,COALESCE(SUM(sri.qty),0)::float8/NULLIF(si.conversion_factor,0),GREATEST(si.qty-COALESCE(SUM(sri.qty),0),0)::float8/NULLIF(si.conversion_factor,0),si.unit_price,si.unit_cost,si.line_total,si.gross_line_total,si.discount_amount,si.price_list_id,si.list_unit_price,si.price_source,si.price_override,si.override_reason,si.override_actor_user_id,si.margin_bps,si.margin_guard_bps,si.below_margin_guard,si.tax_category,si.tax_code,si.tax_rate_name,si.tax_rate_bps,si.tax_base_amount,si.tax_amount,si.total_with_tax,si.tax_exemption_reason FROM sale_items si JOIN products p ON p.id=si.product_id LEFT JOIN product_units pu ON pu.id=si.product_unit_id AND pu.tenant_id=si.tenant_id LEFT JOIN sales_return_items sri ON sri.sale_item_id=si.id WHERE si.tenant_id=$1 AND si.sale_id=$2 GROUP BY si.id,p.id,p.title,p.unit,p.sku,p.brand,p.oem_code,p.barcode,pu.barcode ORDER BY si.created_at`, tenantID, saleID)
 	if err != nil {
 		return SaleDetail{}, err
 	}
@@ -413,12 +417,33 @@ func (s *Service) Detail(ctx context.Context, tenantID, storeID, saleID uuid.UUI
 	out.Items = []SaleLine{}
 	for rows.Next() {
 		var x SaleLine
-		if err := rows.Scan(&x.ID, &x.ProductID, &x.Title, &x.ProductUnitID, &x.UnitCode, &x.UnitName, &x.ConversionFactor, &x.Qty, &x.BaseQty, &x.ReturnedQty, &x.ReturnableQty, &x.UnitPrice, &x.UnitCost, &x.LineTotal, &x.GrossLineTotal, &x.DiscountAmount, &x.PriceListID, &x.ListUnitPrice, &x.PriceSource, &x.PriceOverride, &x.OverrideReason, &x.OverrideActorUserID, &x.MarginBPS, &x.MarginGuardBPS, &x.BelowMarginGuard, &x.TaxCategory, &x.TaxCode, &x.TaxRateName, &x.TaxRateBPS, &x.TaxBaseAmount, &x.TaxAmount, &x.TotalWithTax, &x.TaxExemptionReason); err != nil {
+		if err := rows.Scan(&x.ID, &x.ProductID, &x.Title, &x.SKU, &x.Brand, &x.OEMCode, &x.Barcode, &x.ProductUnitID, &x.UnitCode, &x.UnitName, &x.ConversionFactor, &x.Qty, &x.BaseQty, &x.ReturnedQty, &x.ReturnableQty, &x.UnitPrice, &x.UnitCost, &x.LineTotal, &x.GrossLineTotal, &x.DiscountAmount, &x.PriceListID, &x.ListUnitPrice, &x.PriceSource, &x.PriceOverride, &x.OverrideReason, &x.OverrideActorUserID, &x.MarginBPS, &x.MarginGuardBPS, &x.BelowMarginGuard, &x.TaxCategory, &x.TaxCode, &x.TaxRateName, &x.TaxRateBPS, &x.TaxBaseAmount, &x.TaxAmount, &x.TotalWithTax, &x.TaxExemptionReason); err != nil {
 			return SaleDetail{}, err
 		}
 		out.Items = append(out.Items, x)
 	}
 	return out, rows.Err()
+}
+
+func documentTemplateSnapshot(ctx context.Context, tx pgx.Tx, tenantID, storeID uuid.UUID, requestedID *uuid.UUID) (*uuid.UUID, []byte, error) {
+	var id uuid.UUID
+	var snapshot []byte
+	var err error
+	if requestedID != nil {
+		err = tx.QueryRow(ctx, `SELECT id,jsonb_build_object('id',id,'kind',kind,'name',name,'paper_size',paper_size,'settings',settings) FROM document_templates WHERE id=$1 AND tenant_id=$2 AND store_id=$3 AND kind IN ('sales_invoice','receipt_thermal') AND active`, *requestedID, tenantID, storeID).Scan(&id, &snapshot)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil, errors.New("selected document template is unavailable")
+		}
+	} else {
+		err = tx.QueryRow(ctx, `SELECT id,jsonb_build_object('id',id,'kind',kind,'name',name,'paper_size',paper_size,'settings',settings) FROM document_templates WHERE tenant_id=$1 AND store_id=$2 AND kind='sales_invoice' AND is_default AND active ORDER BY updated_at DESC LIMIT 1`, tenantID, storeID).Scan(&id, &snapshot)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, []byte(`{}`), nil
+		}
+	}
+	if err != nil {
+		return nil, nil, err
+	}
+	return &id, snapshot, nil
 }
 
 func normalizePayments(total int64, legacy string, parts []PaymentPart) ([]PaymentPart, int64, int64, error) {

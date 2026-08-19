@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "@fontsource-variable/vazirmatn/wght.css";
 import "./globals.css";
+import "./ui-documents-15-15.css";
 import "./ui-polish.css";
 import "./ui-polish-15-5-1.css";
 import "./ui-adoption.css";
