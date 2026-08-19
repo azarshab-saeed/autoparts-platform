@@ -36,6 +36,7 @@ import (
 	"github.com/example/autoparts-core/internal/sales"
 	"github.com/example/autoparts-core/internal/stores"
 	"github.com/example/autoparts-core/internal/suppliers"
+	taxsvc "github.com/example/autoparts-core/internal/tax"
 	"github.com/google/uuid"
 )
 
@@ -45,7 +46,7 @@ var (
 	buildTime = "unknown"
 )
 
-const latestMigration = "018_bank_reconciliation_intelligence.sql"
+const latestMigration = "019_tax_official_invoicing.sql"
 
 func main() {
 	log.SetFlags(0)
@@ -75,6 +76,7 @@ func main() {
 	inventorySvc := inventory.NewService(pool)
 	networkSvc := network.NewService(pool)
 	financeSvc := finance.NewService(pool)
+	taxService := taxsvc.NewService(pool)
 	fitmentSvc := fitment.NewService(pool)
 	returnSvc := returnsvc.NewService(pool)
 	reservationSvc := reservations.NewService(pool)
@@ -425,6 +427,180 @@ func main() {
 		}
 		api.WriteJSON(w, http.StatusOK, out)
 	})))
+
+	protected.Handle("GET /v1/tax/settings", auth.RequireRoles("owner", "admin", "cashier", "accountant")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, _ := auth.ClaimsFrom(r.Context())
+		out, err := taxService.GetSettings(r.Context(), c.TenantID, c.StoreID)
+		if err != nil {
+			api.WriteError(w, api.Conflict("tax_settings_failed", err.Error()))
+			return
+		}
+		api.WriteJSON(w, http.StatusOK, out)
+	})))
+	protected.Handle("PUT /v1/tax/settings", auth.RequireRoles("owner", "admin")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, _ := auth.ClaimsFrom(r.Context())
+		var in taxsvc.Settings
+		if err := decodeJSON(r, &in); err != nil {
+			api.WriteError(w, err)
+			return
+		}
+		out, err := taxService.UpdateSettings(r.Context(), c.TenantID, c.StoreID, in)
+		if err != nil {
+			api.WriteError(w, api.Conflict("tax_settings_update_failed", err.Error()))
+			return
+		}
+		api.WriteJSON(w, http.StatusOK, out)
+	})))
+	protected.Handle("GET /v1/tax/rates", auth.RequireRoles("owner", "admin", "accountant")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, _ := auth.ClaimsFrom(r.Context())
+		items, err := taxService.ListRates(r.Context(), c.TenantID, c.StoreID)
+		if err != nil {
+			api.WriteError(w, api.Conflict("tax_rates_failed", err.Error()))
+			return
+		}
+		api.WriteJSON(w, http.StatusOK, map[string]any{"items": items})
+	})))
+	protected.Handle("POST /v1/tax/rates", auth.RequireRoles("owner", "admin")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, _ := auth.ClaimsFrom(r.Context())
+		var in taxsvc.UpsertRate
+		if err := decodeJSON(r, &in); err != nil {
+			api.WriteError(w, err)
+			return
+		}
+		out, err := taxService.UpsertRate(r.Context(), c.TenantID, c.StoreID, in)
+		if err != nil {
+			api.WriteError(w, api.Conflict("tax_rate_update_failed", err.Error()))
+			return
+		}
+		api.WriteJSON(w, http.StatusOK, out)
+	})))
+	protected.Handle("GET /v1/tax/products", auth.RequireRoles("owner", "admin", "accountant")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, _ := auth.ClaimsFrom(r.Context())
+		limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+		if limit <= 0 {
+			limit = 50
+		}
+		items, err := taxService.ListProductTaxProfiles(r.Context(), c.TenantID, c.StoreID, r.URL.Query().Get("q"), limit, time.Now())
+		if err != nil {
+			api.WriteError(w, api.Conflict("product_tax_list_failed", err.Error()))
+			return
+		}
+		api.WriteJSON(w, http.StatusOK, map[string]any{"items": items})
+	})))
+	protected.Handle("PUT /v1/tax/products/{id}", auth.RequireRoles("owner", "admin")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, _ := auth.ClaimsFrom(r.Context())
+		id, err := uuid.Parse(r.PathValue("id"))
+		if err != nil {
+			api.WriteError(w, api.BadRequest("invalid_product_id", "product id must be a UUID"))
+			return
+		}
+		var in struct {
+			TaxCode string `json:"tax_code"`
+		}
+		if err := decodeJSON(r, &in); err != nil {
+			api.WriteError(w, err)
+			return
+		}
+		out, err := taxService.AssignProductTaxCode(r.Context(), c.TenantID, c.StoreID, id, in.TaxCode)
+		if err != nil {
+			api.WriteError(w, api.Conflict("product_tax_update_failed", err.Error()))
+			return
+		}
+		api.WriteJSON(w, http.StatusOK, out)
+	})))
+	protected.Handle("PUT /v1/tax/customers/{id}", auth.RequireRoles("owner", "admin", "accountant")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, _ := auth.ClaimsFrom(r.Context())
+		id, err := uuid.Parse(r.PathValue("id"))
+		if err != nil {
+			api.WriteError(w, api.BadRequest("invalid_customer_id", "customer id must be a UUID"))
+			return
+		}
+		var in taxsvc.CustomerIdentity
+		if err := decodeJSON(r, &in); err != nil {
+			api.WriteError(w, err)
+			return
+		}
+		out, err := taxService.UpdateCustomerIdentity(r.Context(), c.TenantID, c.StoreID, id, in)
+		if err != nil {
+			api.WriteError(w, api.Conflict("customer_tax_identity_update_failed", err.Error()))
+			return
+		}
+		api.WriteJSON(w, http.StatusOK, out)
+	})))
+	protected.Handle("POST /v1/tax/quote", auth.RequireRoles("owner", "admin", "cashier", "accountant")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, _ := auth.ClaimsFrom(r.Context())
+		var in struct {
+			CustomerID  *uuid.UUID              `json:"customer_id,omitempty"`
+			InvoiceMode string                  `json:"invoice_mode"`
+			Items       []taxsvc.QuoteLineInput `json:"items"`
+		}
+		if err := decodeJSON(r, &in); err != nil {
+			api.WriteError(w, err)
+			return
+		}
+		out, err := taxService.Quote(r.Context(), c.TenantID, c.StoreID, in.CustomerID, in.InvoiceMode, time.Now(), in.Items)
+		if err != nil {
+			api.WriteError(w, api.Conflict("tax_quote_failed", err.Error()))
+			return
+		}
+		api.WriteJSON(w, http.StatusOK, out)
+	})))
+	protected.Handle("GET /v1/tax/invoices", auth.RequireRoles("owner", "admin", "accountant")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, _ := auth.ClaimsFrom(r.Context())
+		from, to, err := businessDateRange(r)
+		if err != nil {
+			api.WriteError(w, err)
+			return
+		}
+		limit, offset, err := pageParams(r)
+		if err != nil {
+			api.WriteError(w, err)
+			return
+		}
+		items, total, err := taxService.ListInvoices(r.Context(), c.TenantID, c.StoreID, from, to, r.URL.Query().Get("mode"), limit, offset)
+		if err != nil {
+			api.WriteError(w, api.BadRequest("tax_invoice_list_failed", err.Error()))
+			return
+		}
+		api.WriteJSON(w, http.StatusOK, pagedEnvelope(items, total, limit, offset))
+	})))
+	protected.Handle("GET /v1/tax/invoices/{id}/print-data", auth.RequireRoles("owner", "admin", "cashier", "accountant")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, _ := auth.ClaimsFrom(r.Context())
+		id, err := uuid.Parse(r.PathValue("id"))
+		if err != nil {
+			api.WriteError(w, api.BadRequest("invalid_sale_id", "sale id must be a UUID"))
+			return
+		}
+		out, err := taxService.PrintData(r.Context(), c.TenantID, c.StoreID, id)
+		if err != nil {
+			api.WriteError(w, api.NotFound("invoice_print_data_failed", err.Error()))
+			return
+		}
+		api.WriteJSON(w, http.StatusOK, out)
+	})))
+	protected.Handle("POST /v1/tax/invoices/{id}/actions", auth.RequireRoles("owner", "admin", "accountant")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, _ := auth.ClaimsFrom(r.Context())
+		id, err := uuid.Parse(r.PathValue("id"))
+		if err != nil {
+			api.WriteError(w, api.BadRequest("invalid_sale_id", "sale id must be a UUID"))
+			return
+		}
+		var in struct {
+			ActionType string `json:"action_type"`
+			Reason     string `json:"reason"`
+		}
+		if err := decodeJSON(r, &in); err != nil {
+			api.WriteError(w, err)
+			return
+		}
+		out, err := taxService.RequestInvoiceAction(r.Context(), c.TenantID, c.StoreID, c.UserID, id, in.ActionType, in.Reason)
+		if err != nil {
+			api.WriteError(w, api.Conflict("invoice_action_failed", err.Error()))
+			return
+		}
+		api.WriteJSON(w, http.StatusCreated, out)
+	})))
+
 	protected.Handle("PUT /v1/customers/{id}/price-list", auth.RequireRoles("owner", "admin")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		c, _ := auth.ClaimsFrom(r.Context())
 		customerID, err := uuid.Parse(r.PathValue("id"))

@@ -12,9 +12,9 @@ The goal is not merely to reproduce Holoo accounting screens. The goal is to rem
 
 ## Current checkpoint
 
-- **Latest completed product checkpoint:** Phase 15.13 — Bank Reconciliation & Check Intelligence
-- **Next product phase:** **Phase 15.14 — Tax, VAT & Official Invoicing Foundation**
-- Phase 15.14 should remain the next phase unless a verified blocker makes it impossible to implement safely.
+- **Latest completed product checkpoint:** Phase 15.14 — Tax, VAT & Official Invoicing Foundation
+- **Next product phase:** **Phase 15.15 — Iranian Modian Integration**
+- Phase 15.15 should remain the next phase unless a verified blocker makes it impossible to implement safely.
 - Build/dependency/release hardening tasks are important, but they do **not** replace this product roadmap. They should be handled as blocking fixes, maintenance slices, or release gates unless they materially change product capability.
 
 ---
@@ -41,7 +41,7 @@ We should not spend the roadmap trying to win only by copying a mature accountin
 
 ---
 
-## Competitive status after Phase 15.13
+## Competitive status after Phase 15.14
 
 | Area | Current status | Strategic position |
 |---|---|---|
@@ -73,7 +73,7 @@ We should not spend the roadmap trying to win only by copying a mature accountin
 | Check maturity averaging (راس‌گیری) | **Implemented in 15.13** | Professional finance gap closed |
 | Bank reconciliation | **Implemented in 15.13** | Full/partial matching + audited undo |
 | Future check cash-flow / customer risk | **Implemented in 15.13** | Forward-looking management advantage |
-| Tax/VAT and official invoicing | **Missing** | Major migration blocker |
+| Tax/VAT and official invoicing | **Implemented foundation in 15.14** | Local calculation, accounting, snapshots and official document blocker substantially closed |
 | Iranian Modian integration | **Missing** | Major migration blocker |
 | Advanced invoice/document designer | **Missing** | Important operational gap |
 | User performance / anomaly intelligence | Limited | Opportunity to exceed traditional software |
@@ -289,7 +289,7 @@ Close one of the strongest reasons check-heavy wholesalers stay on legacy accoun
 
 ## Phase 15.14 — Tax, VAT & Official Invoicing Foundation
 
-**Status:** PLANNED
+**Status:** DONE
 
 ### Objective
 
@@ -311,6 +311,18 @@ Make the transaction model legally and operationally ready for official Iranian 
 ### Important implementation rule
 
 Tax behavior must be configuration/version based. Historical invoices must not recalculate because a future tax rate or tenant setting changes.
+
+### Delivered in Phase 15.14
+
+- versioned tax codes/rates and effective-date resolution;
+- tenant seller identity + customer tax identity;
+- normal/official sale mode and atomic local official numbering;
+- immutable seller/buyer/tax snapshots;
+- separate VAT payable accounting;
+- tax-aware sale return reversal;
+- official invoice register, CSV foundation and printable snapshot;
+- local correction/cancellation request prerequisites;
+- POS tax-aware totals with online-only enforcement for official/tax-applied sales.
 
 ---
 
@@ -478,8 +490,8 @@ Unless this document is intentionally revised, continue in this order:
 15.11   Advanced Pricing & Trade Terms            DONE
 15.12   Multi-Unit & Packaging + Product Wizard   DONE
 15.13   Bank Reconciliation & Check Intelligence  DONE
-15.14   Tax, VAT & Official Invoicing Foundation  NEXT
-15.15   Iranian Modian Integration                PLANNED
+15.14   Tax, VAT & Official Invoicing Foundation  DONE
+15.15   Iranian Modian Integration                NEXT
 15.16   Invoice Designer & Store Documents        PLANNED
 15.17   Management Intelligence & User Performance PLANNED
 ```

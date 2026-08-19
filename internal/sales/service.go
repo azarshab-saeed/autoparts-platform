@@ -11,6 +11,7 @@ import (
 
 	"github.com/example/autoparts-core/internal/pricing"
 	"github.com/example/autoparts-core/internal/productunit"
+	taxsvc "github.com/example/autoparts-core/internal/tax"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -61,7 +62,7 @@ func (s *Service) Create(ctx context.Context, cmd CreateSaleCommand) (Sale, erro
 	}
 
 	var existing Sale
-	err = tx.QueryRow(ctx, `SELECT id,gross_amount,discount_amount,total_amount,paid_amount,due_amount,status FROM sales WHERE tenant_id=$1 AND idempotency_key=$2`, cmd.TenantID, cmd.IdempotencyKey).Scan(&existing.ID, &existing.GrossAmount, &existing.DiscountAmount, &existing.TotalAmount, &existing.PaidAmount, &existing.DueAmount, &existing.Status)
+	err = tx.QueryRow(ctx, `SELECT id,gross_amount,discount_amount,net_amount,taxable_amount,exempt_amount,tax_amount,total_amount,paid_amount,due_amount,invoice_mode,COALESCE(invoice_number_display,''),status FROM sales WHERE tenant_id=$1 AND idempotency_key=$2`, cmd.TenantID, cmd.IdempotencyKey).Scan(&existing.ID, &existing.GrossAmount, &existing.DiscountAmount, &existing.NetAmount, &existing.TaxableAmount, &existing.ExemptAmount, &existing.TaxAmount, &existing.TotalAmount, &existing.PaidAmount, &existing.DueAmount, &existing.InvoiceMode, &existing.InvoiceNumberDisplay, &existing.Status)
 	if err == nil {
 		return existing, tx.Commit(ctx)
 	}
@@ -167,7 +168,25 @@ func (s *Service) Create(ctx context.Context, cmd CreateSaleCommand) (Sale, erro
 		})
 	}
 
-	payments, paid, due, err := normalizePayments(total, cmd.PaymentMethod, cmd.Payments)
+	taxInputs := make([]taxsvc.QuoteLineInput, 0, len(prepared))
+	for _, item := range prepared {
+		taxInputs = append(taxInputs, taxsvc.QuoteLineInput{ProductID: item.Input.ProductID, Amount: item.LineTotal})
+	}
+	taxQuote, err := taxsvc.ResolveQuote(ctx, tx, cmd.TenantID, cmd.StoreID, cmd.CustomerID, cmd.InvoiceMode, time.Now(), taxInputs)
+	if err != nil {
+		return Sale{}, fmt.Errorf("tax resolution: %w", err)
+	}
+	if taxQuote.InvoiceMode == "official" && cmd.Source == "edge" {
+		return Sale{}, errors.New("official invoice must be issued online to preserve server-side numbering")
+	}
+	if taxQuote.InvoiceMode == "official" && !taxQuote.SellerReady {
+		return Sale{}, errors.New("official invoice requires seller legal name and national id in tax settings")
+	}
+	if len(taxQuote.Items) != len(prepared) {
+		return Sale{}, errors.New("tax line count invariant violated")
+	}
+
+	payments, paid, due, err := normalizePayments(taxQuote.TotalAmount, cmd.PaymentMethod, cmd.Payments)
 	if err != nil {
 		return Sale{}, err
 	}
@@ -176,13 +195,31 @@ func (s *Service) Create(ctx context.Context, cmd CreateSaleCommand) (Sale, erro
 	}
 
 	saleID := uuid.New()
-	_, err = tx.Exec(ctx, `INSERT INTO sales(id,tenant_id,store_id,warehouse_id,customer_id,status,gross_amount,discount_amount,total_amount,paid_amount,due_amount,idempotency_key,source,edge_device_id,edge_local_operation_id,edge_occurred_at) VALUES($1,$2,$3,$4,$5,'posted',$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`, saleID, cmd.TenantID, cmd.StoreID, cmd.WarehouseID, cmd.CustomerID, grossTotal, discountTotal, total, paid, due, cmd.IdempotencyKey, cmd.Source, cmd.EdgeDeviceID, strings.TrimSpace(cmd.EdgeLocalOperationID), cmd.EdgeOccurredAt)
+	var invoiceSeries, invoiceNumberDisplay string
+	var invoiceNumber *int64
+	var invoiceIssuedAt *time.Time
+	invoiceState := "not_applicable"
+	if taxQuote.InvoiceMode == "official" {
+		series, number, display, allocErr := taxsvc.AllocateOfficialNumber(ctx, tx, cmd.TenantID, cmd.StoreID)
+		if allocErr != nil {
+			return Sale{}, allocErr
+		}
+		invoiceSeries, invoiceNumberDisplay = series, display
+		invoiceNumber = &number
+		now := time.Now().UTC()
+		invoiceIssuedAt = &now
+		invoiceState = "issued"
+	}
+	sellerSnapshot, _ := json.Marshal(taxQuote.SellerSnapshot)
+	buyerSnapshot, _ := json.Marshal(taxQuote.BuyerSnapshot)
+	_, err = tx.Exec(ctx, `INSERT INTO sales(id,tenant_id,store_id,warehouse_id,customer_id,status,gross_amount,discount_amount,net_amount,taxable_amount,exempt_amount,tax_amount,total_amount,paid_amount,due_amount,idempotency_key,source,edge_device_id,edge_local_operation_id,edge_occurred_at,invoice_mode,invoice_state,invoice_series,invoice_number,invoice_number_display,invoice_issued_at,seller_snapshot,buyer_snapshot,tax_calculation_mode) VALUES($1,$2,$3,$4,$5,'posted',$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,NULLIF($22,''),$23,NULLIF($24,''),$25,$26,$27,$28)`, saleID, cmd.TenantID, cmd.StoreID, cmd.WarehouseID, cmd.CustomerID, grossTotal, discountTotal, taxQuote.NetAmount, taxQuote.TaxableAmount, taxQuote.ExemptAmount, taxQuote.TaxAmount, taxQuote.TotalAmount, paid, due, cmd.IdempotencyKey, cmd.Source, cmd.EdgeDeviceID, strings.TrimSpace(cmd.EdgeLocalOperationID), cmd.EdgeOccurredAt, taxQuote.InvoiceMode, invoiceState, invoiceSeries, invoiceNumber, invoiceNumberDisplay, invoiceIssuedAt, sellerSnapshot, buyerSnapshot, taxQuote.CalculationMode)
 	if err != nil {
 		return Sale{}, err
 	}
 
-	for _, item := range prepared {
-		_, err = tx.Exec(ctx, `INSERT INTO sale_items(tenant_id,sale_id,product_id,qty,product_unit_id,commercial_qty,commercial_unit_code,commercial_unit_name,conversion_factor,unit_price,unit_cost,line_total,gross_line_total,discount_amount,price_list_id,list_unit_price,price_source,price_override,override_reason,override_actor_user_id,margin_bps,margin_guard_bps,below_margin_guard) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,NULLIF($19,''),$20,$21,$22,$23)`, cmd.TenantID, saleID, item.Input.ProductID, item.BaseQty, item.Unit.ID, item.Input.Qty, item.Unit.Code, item.Unit.Name, item.Unit.FactorToBase, item.Input.UnitPrice, item.AvgUnitCost, item.LineTotal, item.GrossLineTotal, item.DiscountAmount, item.PriceListID, item.ListUnitPrice, item.PriceSource, item.PriceOverride, item.OverrideReason, item.OverrideActorUserID, item.MarginBPS, item.MarginGuardBPS, item.BelowMarginGuard)
+	for idx, item := range prepared {
+		taxLine := taxQuote.Items[idx]
+		_, err = tx.Exec(ctx, `INSERT INTO sale_items(tenant_id,sale_id,product_id,qty,product_unit_id,commercial_qty,commercial_unit_code,commercial_unit_name,conversion_factor,unit_price,unit_cost,line_total,gross_line_total,discount_amount,price_list_id,list_unit_price,price_source,price_override,override_reason,override_actor_user_id,margin_bps,margin_guard_bps,below_margin_guard,tax_category,tax_code,tax_rate_name,tax_rate_bps,tax_base_amount,tax_amount,total_with_tax,tax_exemption_reason) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,NULLIF($19,''),$20,$21,$22,$23,$24,NULLIF($25,''),NULLIF($26,''),$27,$28,$29,$30,NULLIF($31,''))`, cmd.TenantID, saleID, item.Input.ProductID, item.BaseQty, item.Unit.ID, item.Input.Qty, item.Unit.Code, item.Unit.Name, item.Unit.FactorToBase, item.Input.UnitPrice, item.AvgUnitCost, item.LineTotal, item.GrossLineTotal, item.DiscountAmount, item.PriceListID, item.ListUnitPrice, item.PriceSource, item.PriceOverride, item.OverrideReason, item.OverrideActorUserID, item.MarginBPS, item.MarginGuardBPS, item.BelowMarginGuard, taxLine.Category, taxLine.TaxCode, taxLine.TaxRateName, taxLine.TaxRateBPS, taxLine.TaxBaseAmount, taxLine.TaxAmount, taxLine.TotalWithTax, taxLine.ExemptionReason)
 		if err != nil {
 			return Sale{}, err
 		}
@@ -224,8 +261,13 @@ func (s *Service) Create(ctx context.Context, cmd CreateSaleCommand) (Sale, erro
 			return Sale{}, err
 		}
 	}
-	if err = insertEntry(ctx, tx, cmd.TenantID, journalID, accounts["SALES"], 0, total); err != nil {
+	if err = insertEntry(ctx, tx, cmd.TenantID, journalID, accounts["SALES"], 0, taxQuote.NetAmount); err != nil {
 		return Sale{}, err
+	}
+	if taxQuote.TaxAmount > 0 {
+		if err = insertEntry(ctx, tx, cmd.TenantID, journalID, accounts["VAT_PAYABLE"], 0, taxQuote.TaxAmount); err != nil {
+			return Sale{}, err
+		}
 	}
 	if cogsTotal > 0 {
 		if err = insertEntry(ctx, tx, cmd.TenantID, journalID, accounts["COGS"], cogsTotal, 0); err != nil {
@@ -236,14 +278,14 @@ func (s *Service) Create(ctx context.Context, cmd CreateSaleCommand) (Sale, erro
 		}
 	}
 
-	payload, _ := json.Marshal(map[string]any{"sale_id": saleID, "gross_amount": grossTotal, "discount_amount": discountTotal, "total_amount": total, "paid_amount": paid, "due_amount": due, "warehouse_id": cmd.WarehouseID})
+	payload, _ := json.Marshal(map[string]any{"sale_id": saleID, "gross_amount": grossTotal, "discount_amount": discountTotal, "net_amount": taxQuote.NetAmount, "tax_amount": taxQuote.TaxAmount, "total_amount": taxQuote.TotalAmount, "invoice_mode": taxQuote.InvoiceMode, "invoice_number": invoiceNumberDisplay, "paid_amount": paid, "due_amount": due, "warehouse_id": cmd.WarehouseID})
 	if _, err = tx.Exec(ctx, `INSERT INTO outbox_events(tenant_id,aggregate_type,aggregate_id,event_type,payload) VALUES($1,'sale',$2,'sale.created',$3)`, cmd.TenantID, saleID, payload); err != nil {
 		return Sale{}, err
 	}
 	if err = tx.Commit(ctx); err != nil {
 		return Sale{}, err
 	}
-	return Sale{ID: saleID, GrossAmount: grossTotal, DiscountAmount: discountTotal, TotalAmount: total, PaidAmount: paid, DueAmount: due, Status: "posted"}, nil
+	return Sale{ID: saleID, GrossAmount: grossTotal, DiscountAmount: discountTotal, NetAmount: taxQuote.NetAmount, TaxableAmount: taxQuote.TaxableAmount, ExemptAmount: taxQuote.ExemptAmount, TaxAmount: taxQuote.TaxAmount, TotalAmount: taxQuote.TotalAmount, PaidAmount: paid, DueAmount: due, InvoiceMode: taxQuote.InvoiceMode, InvoiceNumberDisplay: invoiceNumberDisplay, Status: "posted"}, nil
 }
 
 type preparedSaleItem struct {
@@ -355,7 +397,7 @@ func saleBreakPrice(ctx context.Context, tx pgx.Tx, tenantID, storeID, productID
 func (s *Service) Detail(ctx context.Context, tenantID, storeID, saleID uuid.UUID) (SaleDetail, error) {
 	var out SaleDetail
 	var created time.Time
-	err := s.db.QueryRow(ctx, `SELECT s.id,s.customer_id,COALESCE(c.name,''),s.warehouse_id,s.gross_amount,s.discount_amount,s.total_amount,s.paid_amount,s.due_amount,s.status,s.created_at FROM sales s LEFT JOIN customers c ON c.id=s.customer_id WHERE s.id=$1 AND s.tenant_id=$2 AND s.store_id=$3`, saleID, tenantID, storeID).Scan(&out.ID, &out.CustomerID, &out.CustomerName, &out.WarehouseID, &out.GrossAmount, &out.DiscountAmount, &out.TotalAmount, &out.PaidAmount, &out.DueAmount, &out.Status, &created)
+	err := s.db.QueryRow(ctx, `SELECT s.id,s.customer_id,COALESCE(c.name,''),s.warehouse_id,s.gross_amount,s.discount_amount,s.net_amount,s.taxable_amount,s.exempt_amount,s.tax_amount,s.total_amount,s.paid_amount,s.due_amount,s.invoice_mode,s.invoice_state,COALESCE(s.invoice_number_display,''),s.status,s.created_at FROM sales s LEFT JOIN customers c ON c.id=s.customer_id WHERE s.id=$1 AND s.tenant_id=$2 AND s.store_id=$3`, saleID, tenantID, storeID).Scan(&out.ID, &out.CustomerID, &out.CustomerName, &out.WarehouseID, &out.GrossAmount, &out.DiscountAmount, &out.NetAmount, &out.TaxableAmount, &out.ExemptAmount, &out.TaxAmount, &out.TotalAmount, &out.PaidAmount, &out.DueAmount, &out.InvoiceMode, &out.InvoiceState, &out.InvoiceNumberDisplay, &out.Status, &created)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return SaleDetail{}, errors.New("sale not found")
 	}
@@ -363,7 +405,7 @@ func (s *Service) Detail(ctx context.Context, tenantID, storeID, saleID uuid.UUI
 		return SaleDetail{}, err
 	}
 	out.CreatedAt = created.Format(time.RFC3339)
-	rows, err := s.db.Query(ctx, `SELECT si.id,si.product_id,p.title,si.product_unit_id,COALESCE(si.commercial_unit_code,p.unit),COALESCE(si.commercial_unit_name,p.unit),si.conversion_factor::float8,COALESCE(si.commercial_qty,si.qty)::float8,si.qty::float8,COALESCE(SUM(sri.qty),0)::float8/NULLIF(si.conversion_factor,0),GREATEST(si.qty-COALESCE(SUM(sri.qty),0),0)::float8/NULLIF(si.conversion_factor,0),si.unit_price,si.unit_cost,si.line_total,si.gross_line_total,si.discount_amount,si.price_list_id,si.list_unit_price,si.price_source,si.price_override,si.override_reason,si.override_actor_user_id,si.margin_bps,si.margin_guard_bps,si.below_margin_guard FROM sale_items si JOIN products p ON p.id=si.product_id LEFT JOIN sales_return_items sri ON sri.sale_item_id=si.id WHERE si.tenant_id=$1 AND si.sale_id=$2 GROUP BY si.id,p.title,p.unit ORDER BY si.created_at`, tenantID, saleID)
+	rows, err := s.db.Query(ctx, `SELECT si.id,si.product_id,p.title,si.product_unit_id,COALESCE(si.commercial_unit_code,p.unit),COALESCE(si.commercial_unit_name,p.unit),si.conversion_factor::float8,COALESCE(si.commercial_qty,si.qty)::float8,si.qty::float8,COALESCE(SUM(sri.qty),0)::float8/NULLIF(si.conversion_factor,0),GREATEST(si.qty-COALESCE(SUM(sri.qty),0),0)::float8/NULLIF(si.conversion_factor,0),si.unit_price,si.unit_cost,si.line_total,si.gross_line_total,si.discount_amount,si.price_list_id,si.list_unit_price,si.price_source,si.price_override,si.override_reason,si.override_actor_user_id,si.margin_bps,si.margin_guard_bps,si.below_margin_guard,si.tax_category,si.tax_code,si.tax_rate_name,si.tax_rate_bps,si.tax_base_amount,si.tax_amount,si.total_with_tax,si.tax_exemption_reason FROM sale_items si JOIN products p ON p.id=si.product_id LEFT JOIN sales_return_items sri ON sri.sale_item_id=si.id WHERE si.tenant_id=$1 AND si.sale_id=$2 GROUP BY si.id,p.title,p.unit ORDER BY si.created_at`, tenantID, saleID)
 	if err != nil {
 		return SaleDetail{}, err
 	}
@@ -371,7 +413,7 @@ func (s *Service) Detail(ctx context.Context, tenantID, storeID, saleID uuid.UUI
 	out.Items = []SaleLine{}
 	for rows.Next() {
 		var x SaleLine
-		if err := rows.Scan(&x.ID, &x.ProductID, &x.Title, &x.ProductUnitID, &x.UnitCode, &x.UnitName, &x.ConversionFactor, &x.Qty, &x.BaseQty, &x.ReturnedQty, &x.ReturnableQty, &x.UnitPrice, &x.UnitCost, &x.LineTotal, &x.GrossLineTotal, &x.DiscountAmount, &x.PriceListID, &x.ListUnitPrice, &x.PriceSource, &x.PriceOverride, &x.OverrideReason, &x.OverrideActorUserID, &x.MarginBPS, &x.MarginGuardBPS, &x.BelowMarginGuard); err != nil {
+		if err := rows.Scan(&x.ID, &x.ProductID, &x.Title, &x.ProductUnitID, &x.UnitCode, &x.UnitName, &x.ConversionFactor, &x.Qty, &x.BaseQty, &x.ReturnedQty, &x.ReturnableQty, &x.UnitPrice, &x.UnitCost, &x.LineTotal, &x.GrossLineTotal, &x.DiscountAmount, &x.PriceListID, &x.ListUnitPrice, &x.PriceSource, &x.PriceOverride, &x.OverrideReason, &x.OverrideActorUserID, &x.MarginBPS, &x.MarginGuardBPS, &x.BelowMarginGuard, &x.TaxCategory, &x.TaxCode, &x.TaxRateName, &x.TaxRateBPS, &x.TaxBaseAmount, &x.TaxAmount, &x.TotalWithTax, &x.TaxExemptionReason); err != nil {
 			return SaleDetail{}, err
 		}
 		out.Items = append(out.Items, x)
@@ -417,7 +459,7 @@ func normalizePayments(total int64, legacy string, parts []PaymentPart) ([]Payme
 }
 
 func ensureDefaultAccounts(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID) (map[string]uuid.UUID, error) {
-	defs := []struct{ code, name, typeName string }{{"CASH", "Cash", "asset"}, {"BANK_CARD", "Card Clearing", "asset"}, {"AR", "Accounts Receivable", "asset"}, {"SALES", "Sales Revenue", "revenue"}, {"INVENTORY", "Inventory", "asset"}, {"COGS", "Cost of Goods Sold", "expense"}}
+	defs := []struct{ code, name, typeName string }{{"CASH", "Cash", "asset"}, {"BANK_CARD", "Card Clearing", "asset"}, {"AR", "Accounts Receivable", "asset"}, {"SALES", "Sales Revenue", "revenue"}, {"VAT_PAYABLE", "VAT Payable", "liability"}, {"INVENTORY", "Inventory", "asset"}, {"COGS", "Cost of Goods Sold", "expense"}}
 	result := make(map[string]uuid.UUID, len(defs))
 	for _, d := range defs {
 		var id uuid.UUID

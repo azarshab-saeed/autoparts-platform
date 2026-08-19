@@ -52,8 +52,8 @@ func (s *Service) CreateSaleReturn(ctx context.Context, cmd SaleReturnCommand) (
 		return Result{}, errors.New("credit_balance return requires a customer")
 	}
 	returnID := uuid.New()
-	total, totalCost := int64(0), int64(0)
-	if _, err = tx.Exec(ctx, `INSERT INTO sales_returns(id,tenant_id,store_id,warehouse_id,sale_id,customer_id,refund_method,total_amount,total_cost,idempotency_key) VALUES($1,$2,$3,$4,$5,$6,$7,1,0,$8)`, returnID, cmd.TenantID, cmd.StoreID, warehouseID, cmd.SaleID, customerID, cmd.RefundMethod, cmd.IdempotencyKey); err != nil {
+	total, totalNet, totalTax, totalCost := int64(0), int64(0), int64(0), int64(0)
+	if _, err = tx.Exec(ctx, `INSERT INTO sales_returns(id,tenant_id,store_id,warehouse_id,sale_id,customer_id,refund_method,total_amount,net_amount,tax_amount,total_cost,idempotency_key) VALUES($1,$2,$3,$4,$5,$6,$7,1,0,0,0,$8)`, returnID, cmd.TenantID, cmd.StoreID, warehouseID, cmd.SaleID, customerID, cmd.RefundMethod, cmd.IdempotencyKey); err != nil {
 		return Result{}, err
 	}
 	for _, ri := range cmd.Items {
@@ -62,8 +62,8 @@ func (s *Service) CreateSaleReturn(ctx context.Context, cmd SaleReturnCommand) (
 		}
 		var productID uuid.UUID
 		var soldQty, factor float64
-		var unitPrice, unitCost int64
-		err = tx.QueryRow(ctx, `SELECT product_id,qty,unit_price,unit_cost,conversion_factor::float8 FROM sale_items WHERE id=$1 AND tenant_id=$2 AND sale_id=$3 FOR UPDATE`, ri.SourceItemID, cmd.TenantID, cmd.SaleID).Scan(&productID, &soldQty, &unitPrice, &unitCost, &factor)
+		var unitPrice, unitCost, sourceTax, sourceTotal int64
+		err = tx.QueryRow(ctx, `SELECT product_id,qty,unit_price,unit_cost,conversion_factor::float8,tax_amount,total_with_tax FROM sale_items WHERE id=$1 AND tenant_id=$2 AND sale_id=$3 FOR UPDATE`, ri.SourceItemID, cmd.TenantID, cmd.SaleID).Scan(&productID, &soldQty, &unitPrice, &unitCost, &factor, &sourceTax, &sourceTotal)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return Result{}, fmt.Errorf("sale item %s not found", ri.SourceItemID)
 		}
@@ -71,7 +71,8 @@ func (s *Service) CreateSaleReturn(ctx context.Context, cmd SaleReturnCommand) (
 			return Result{}, err
 		}
 		var returned float64
-		if err = tx.QueryRow(ctx, `SELECT COALESCE(SUM(qty),0) FROM sales_return_items WHERE tenant_id=$1 AND sale_item_id=$2`, cmd.TenantID, ri.SourceItemID).Scan(&returned); err != nil {
+		var returnedNet, returnedTax int64
+		if err = tx.QueryRow(ctx, `SELECT COALESCE(SUM(qty),0)::float8,COALESCE(SUM(net_amount),0)::bigint,COALESCE(SUM(tax_amount),0)::bigint FROM sales_return_items WHERE tenant_id=$1 AND sale_item_id=$2`, cmd.TenantID, ri.SourceItemID).Scan(&returned, &returnedNet, &returnedTax); err != nil {
 			return Result{}, err
 		}
 		if factor <= 0 {
@@ -81,12 +82,25 @@ func (s *Service) CreateSaleReturn(ctx context.Context, cmd SaleReturnCommand) (
 		if returnBaseQty > soldQty-returned+1e-9 {
 			return Result{}, errors.New("return quantity exceeds remaining sale quantity")
 		}
-		line := int64(math.Round(ri.Qty * float64(unitPrice)))
+		sourceNet := sourceTotal - sourceTax
+		remainingBase := soldQty - returned
+		lineNet, lineTax := int64(0), int64(0)
+		if math.Abs(returnBaseQty-remainingBase) < 1e-9 {
+			lineNet = sourceNet - returnedNet
+			lineTax = sourceTax - returnedTax
+		} else {
+			ratio := returnBaseQty / soldQty
+			lineNet = int64(math.Round(float64(sourceNet) * ratio))
+			lineTax = int64(math.Round(float64(sourceTax) * ratio))
+		}
+		line := lineNet + lineTax
 		cost := int64(math.Round(returnBaseQty * float64(unitCost)))
-		if total > math.MaxInt64-line || totalCost > math.MaxInt64-cost {
+		if lineNet < 0 || lineTax < 0 || line < 0 || total > math.MaxInt64-line || totalNet > math.MaxInt64-lineNet || totalTax > math.MaxInt64-lineTax || totalCost > math.MaxInt64-cost {
 			return Result{}, errors.New("return total overflow")
 		}
 		total += line
+		totalNet += lineNet
+		totalTax += lineTax
 		totalCost += cost
 		var oldQty float64
 		var oldAvg int64
@@ -104,7 +118,7 @@ func (s *Service) CreateSaleReturn(ctx context.Context, cmd SaleReturnCommand) (
 		if _, err = tx.Exec(ctx, `UPDATE inventory_balances SET on_hand=$4,avg_unit_cost=$5,updated_at=now() WHERE tenant_id=$1 AND warehouse_id=$2 AND product_id=$3`, cmd.TenantID, warehouseID, productID, newQty, newAvg); err != nil {
 			return Result{}, err
 		}
-		if _, err = tx.Exec(ctx, `INSERT INTO sales_return_items(tenant_id,sales_return_id,sale_item_id,product_id,qty,unit_price,unit_cost,line_total) VALUES($1,$2,$3,$4,$5,$6,$7,$8)`, cmd.TenantID, returnID, ri.SourceItemID, productID, returnBaseQty, unitPrice, unitCost, line); err != nil {
+		if _, err = tx.Exec(ctx, `INSERT INTO sales_return_items(tenant_id,sales_return_id,sale_item_id,product_id,qty,unit_price,unit_cost,line_total,net_amount,tax_amount) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`, cmd.TenantID, returnID, ri.SourceItemID, productID, returnBaseQty, unitPrice, unitCost, line, lineNet, lineTax); err != nil {
 			return Result{}, err
 		}
 		if _, err = tx.Exec(ctx, `INSERT INTO inventory_movements(tenant_id,warehouse_id,product_id,movement_type,qty_delta,unit_cost,cost_delta,reference_type,reference_id) VALUES($1,$2,$3,'return_in',$4,$5,$6,'sale_return',$7)`, cmd.TenantID, warehouseID, productID, returnBaseQty, unitCost, cost, returnID); err != nil {
@@ -114,7 +128,7 @@ func (s *Service) CreateSaleReturn(ctx context.Context, cmd SaleReturnCommand) (
 	if total <= 0 {
 		return Result{}, errors.New("return total must be positive")
 	}
-	if _, err = tx.Exec(ctx, `UPDATE sales_returns SET total_amount=$2,total_cost=$3 WHERE id=$1`, returnID, total, totalCost); err != nil {
+	if _, err = tx.Exec(ctx, `UPDATE sales_returns SET total_amount=$2,net_amount=$3,tax_amount=$4,total_cost=$5 WHERE id=$1`, returnID, total, totalNet, totalTax, totalCost); err != nil {
 		return Result{}, err
 	}
 	accounts, err := ensureAccounts(ctx, tx, cmd.TenantID)
@@ -125,8 +139,13 @@ func (s *Service) CreateSaleReturn(ctx context.Context, cmd SaleReturnCommand) (
 	if _, err = tx.Exec(ctx, `INSERT INTO journals(id,tenant_id,reference_type,reference_id) VALUES($1,$2,'sale_return',$3)`, journalID, cmd.TenantID, returnID); err != nil {
 		return Result{}, err
 	}
-	if err = entry(ctx, tx, cmd.TenantID, journalID, accounts["SALES"], total, 0); err != nil {
+	if err = entry(ctx, tx, cmd.TenantID, journalID, accounts["SALES"], totalNet, 0); err != nil {
 		return Result{}, err
+	}
+	if totalTax > 0 {
+		if err = entry(ctx, tx, cmd.TenantID, journalID, accounts["VAT_PAYABLE"], totalTax, 0); err != nil {
+			return Result{}, err
+		}
 	}
 	creditCode := refundAccount(cmd.RefundMethod, "AR")
 	if err = entry(ctx, tx, cmd.TenantID, journalID, accounts[creditCode], 0, total); err != nil {
@@ -145,7 +164,7 @@ func (s *Service) CreateSaleReturn(ctx context.Context, cmd SaleReturnCommand) (
 			return Result{}, err
 		}
 	}
-	payload, _ := json.Marshal(map[string]any{"sales_return_id": returnID, "sale_id": cmd.SaleID, "total_amount": total})
+	payload, _ := json.Marshal(map[string]any{"sales_return_id": returnID, "sale_id": cmd.SaleID, "net_amount": totalNet, "tax_amount": totalTax, "total_amount": total})
 	if _, err = tx.Exec(ctx, `INSERT INTO outbox_events(tenant_id,aggregate_type,aggregate_id,event_type,payload) VALUES($1,'sale_return',$2,'sale.returned',$3)`, cmd.TenantID, returnID, payload); err != nil {
 		return Result{}, err
 	}
@@ -306,7 +325,7 @@ func weightedAverage(oldQty float64, oldAvg int64, incomingQty float64, incoming
 	return int64(math.Round((oldQty*float64(oldAvg) + incomingQty*float64(incomingCost)) / newQty))
 }
 func ensureAccounts(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID) (map[string]uuid.UUID, error) {
-	defs := []struct{ code, name, typ string }{{"CASH", "Cash", "asset"}, {"BANK_CARD", "Card Clearing", "asset"}, {"AR", "Accounts Receivable", "asset"}, {"AP", "Accounts Payable", "liability"}, {"SALES", "Sales Revenue", "revenue"}, {"INVENTORY", "Inventory", "asset"}, {"COGS", "Cost of Goods Sold", "expense"}}
+	defs := []struct{ code, name, typ string }{{"CASH", "Cash", "asset"}, {"BANK_CARD", "Card Clearing", "asset"}, {"AR", "Accounts Receivable", "asset"}, {"AP", "Accounts Payable", "liability"}, {"SALES", "Sales Revenue", "revenue"}, {"VAT_PAYABLE", "VAT Payable", "liability"}, {"INVENTORY", "Inventory", "asset"}, {"COGS", "Cost of Goods Sold", "expense"}}
 	out := map[string]uuid.UUID{}
 	for _, d := range defs {
 		var id uuid.UUID

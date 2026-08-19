@@ -7,6 +7,7 @@ import "./ui-adoption.css";
 import "./ui-finance-15-9.css";
 import "./ui-finance-15-13.css";
 import "./ui-phase15-12.css";
+import "./ui-tax-15-14.css";
 import { AuthProvider } from "@/components/auth-provider";
 
 export const metadata: Metadata = {

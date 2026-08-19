@@ -36,10 +36,11 @@ func (s *Service) ListSales(ctx context.Context, tenantID, storeID uuid.UUID, fr
 	}
 	like := "%" + strings.ToLower(strings.TrimSpace(q)) + "%"
 	query := `
-		SELECT s.id,s.customer_id,COALESCE(c.name,''),s.gross_amount,s.discount_amount,s.total_amount,s.paid_amount,s.due_amount,s.status,s.created_at,
+		SELECT s.id,s.customer_id,COALESCE(c.name,''),s.gross_amount,s.discount_amount,s.net_amount,s.tax_amount,s.total_amount,s.paid_amount,s.due_amount,s.status,s.created_at,
 		       (SELECT COUNT(*)::int FROM sale_items si WHERE si.tenant_id=s.tenant_id AND si.sale_id=s.id),
 		       COALESCE((SELECT SUM(si.qty)::float8 FROM sale_items si WHERE si.tenant_id=s.tenant_id AND si.sale_id=s.id),0),
 		       (SELECT COUNT(*)::int FROM sale_items si WHERE si.tenant_id=s.tenant_id AND si.sale_id=s.id AND si.below_margin_guard),
+		       s.invoice_mode,COALESCE(s.invoice_number_display,''),
 		       (EXISTS(SELECT 1 FROM network_reservations nr WHERE nr.tenant_id=s.tenant_id AND nr.store_id=s.store_id AND nr.sale_id=s.id) OR EXISTS(SELECT 1 FROM network_procurements np WHERE np.seller_tenant_id=s.tenant_id AND np.seller_store_id=s.store_id AND np.seller_sale_id=s.id)),
 		       COUNT(*) OVER()::int
 		FROM sales s
@@ -59,7 +60,7 @@ func (s *Service) ListSales(ctx context.Context, tenantID, storeID uuid.UUID, fr
 		var x SaleListItem
 		var created time.Time
 		var count int
-		if err := rows.Scan(&x.ID, &x.CustomerID, &x.CustomerName, &x.GrossAmount, &x.DiscountAmount, &x.TotalAmount, &x.PaidAmount, &x.DueAmount, &x.Status, &created, &x.LineCount, &x.TotalQty, &x.BelowMarginCount, &x.NetworkSource, &count); err != nil {
+		if err := rows.Scan(&x.ID, &x.CustomerID, &x.CustomerName, &x.GrossAmount, &x.DiscountAmount, &x.NetAmount, &x.TaxAmount, &x.TotalAmount, &x.PaidAmount, &x.DueAmount, &x.Status, &created, &x.LineCount, &x.TotalQty, &x.BelowMarginCount, &x.InvoiceMode, &x.InvoiceNumber, &x.NetworkSource, &count); err != nil {
 			return nil, 0, err
 		}
 		x.CreatedAt = created.Format(time.RFC3339)
@@ -124,14 +125,14 @@ func (s *Service) Dashboard(ctx context.Context, tenantID, storeID uuid.UUID, no
 	day := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
 	tomorrow := day.AddDate(0, 0, 1)
 	out := DashboardSummary{RecentSales: []SaleListItem{}, SalesLastSevenDays: []DailyAmount{}}
-	if err := s.db.QueryRow(ctx, `SELECT COALESCE(SUM(total_amount),0)::bigint FROM sales WHERE tenant_id=$1 AND store_id=$2 AND status='posted' AND created_at >= $3 AND created_at < $4`, tenantID, storeID, day, tomorrow).Scan(&out.SalesToday); err != nil {
+	if err := s.db.QueryRow(ctx, `SELECT COALESCE(SUM(net_amount),0)::bigint FROM sales WHERE tenant_id=$1 AND store_id=$2 AND status='posted' AND created_at >= $3 AND created_at < $4`, tenantID, storeID, day, tomorrow).Scan(&out.SalesToday); err != nil {
 		return out, err
 	}
 	var cogsToday, cogsReversed int64
 	if err := s.db.QueryRow(ctx, `SELECT COALESCE(SUM(si.qty*si.unit_cost),0)::bigint FROM sale_items si JOIN sales s ON s.id=si.sale_id AND s.tenant_id=si.tenant_id WHERE s.tenant_id=$1 AND s.store_id=$2 AND s.status='posted' AND s.created_at >= $3 AND s.created_at < $4`, tenantID, storeID, day, tomorrow).Scan(&cogsToday); err != nil {
 		return out, err
 	}
-	if err := s.db.QueryRow(ctx, `SELECT COALESCE(SUM(total_amount),0)::bigint,COALESCE(SUM(total_cost),0)::bigint FROM sales_returns WHERE tenant_id=$1 AND store_id=$2 AND created_at >= $3 AND created_at < $4`, tenantID, storeID, day, tomorrow).Scan(&out.SalesReturnsToday, &cogsReversed); err != nil {
+	if err := s.db.QueryRow(ctx, `SELECT COALESCE(SUM(net_amount),0)::bigint,COALESCE(SUM(total_cost),0)::bigint FROM sales_returns WHERE tenant_id=$1 AND store_id=$2 AND created_at >= $3 AND created_at < $4`, tenantID, storeID, day, tomorrow).Scan(&out.SalesReturnsToday, &cogsReversed); err != nil {
 		return out, err
 	}
 	out.NetSalesToday = out.SalesToday - out.SalesReturnsToday
@@ -183,14 +184,14 @@ func (s *Service) Dashboard(ctx context.Context, tenantID, storeID uuid.UUID, no
 		  )`, tenantID, storeID, networkStart).Scan(&out.NetworkSales30d, &out.NetworkSalesCount30d); err != nil {
 		return out, err
 	}
-	rows, err := s.db.Query(ctx, `SELECT s.id,s.customer_id,COALESCE(c.name,''),s.gross_amount,s.discount_amount,s.total_amount,s.paid_amount,s.due_amount,s.status,s.created_at,(SELECT COUNT(*)::int FROM sale_items si WHERE si.tenant_id=s.tenant_id AND si.sale_id=s.id),COALESCE((SELECT SUM(si.qty)::float8 FROM sale_items si WHERE si.tenant_id=s.tenant_id AND si.sale_id=s.id),0),(SELECT COUNT(*)::int FROM sale_items si WHERE si.tenant_id=s.tenant_id AND si.sale_id=s.id AND si.below_margin_guard),(EXISTS(SELECT 1 FROM network_reservations nr WHERE nr.sale_id=s.id AND nr.tenant_id=s.tenant_id) OR EXISTS(SELECT 1 FROM network_procurements np WHERE np.seller_sale_id=s.id AND np.seller_tenant_id=s.tenant_id)) FROM sales s LEFT JOIN customers c ON c.id=s.customer_id AND c.tenant_id=s.tenant_id WHERE s.tenant_id=$1 AND s.store_id=$2 ORDER BY s.created_at DESC LIMIT 5`, tenantID, storeID)
+	rows, err := s.db.Query(ctx, `SELECT s.id,s.customer_id,COALESCE(c.name,''),s.gross_amount,s.discount_amount,s.net_amount,s.tax_amount,s.total_amount,s.paid_amount,s.due_amount,s.status,s.created_at,(SELECT COUNT(*)::int FROM sale_items si WHERE si.tenant_id=s.tenant_id AND si.sale_id=s.id),COALESCE((SELECT SUM(si.qty)::float8 FROM sale_items si WHERE si.tenant_id=s.tenant_id AND si.sale_id=s.id),0),(SELECT COUNT(*)::int FROM sale_items si WHERE si.tenant_id=s.tenant_id AND si.sale_id=s.id AND si.below_margin_guard),s.invoice_mode,COALESCE(s.invoice_number_display,''),(EXISTS(SELECT 1 FROM network_reservations nr WHERE nr.sale_id=s.id AND nr.tenant_id=s.tenant_id) OR EXISTS(SELECT 1 FROM network_procurements np WHERE np.seller_sale_id=s.id AND np.seller_tenant_id=s.tenant_id)) FROM sales s LEFT JOIN customers c ON c.id=s.customer_id AND c.tenant_id=s.tenant_id WHERE s.tenant_id=$1 AND s.store_id=$2 ORDER BY s.created_at DESC LIMIT 5`, tenantID, storeID)
 	if err != nil {
 		return out, err
 	}
 	for rows.Next() {
 		var x SaleListItem
 		var created time.Time
-		if err := rows.Scan(&x.ID, &x.CustomerID, &x.CustomerName, &x.GrossAmount, &x.DiscountAmount, &x.TotalAmount, &x.PaidAmount, &x.DueAmount, &x.Status, &created, &x.LineCount, &x.TotalQty, &x.BelowMarginCount, &x.NetworkSource); err != nil {
+		if err := rows.Scan(&x.ID, &x.CustomerID, &x.CustomerName, &x.GrossAmount, &x.DiscountAmount, &x.NetAmount, &x.TaxAmount, &x.TotalAmount, &x.PaidAmount, &x.DueAmount, &x.Status, &created, &x.LineCount, &x.TotalQty, &x.BelowMarginCount, &x.InvoiceMode, &x.InvoiceNumber, &x.NetworkSource); err != nil {
 			rows.Close()
 			return out, err
 		}
@@ -199,7 +200,7 @@ func (s *Service) Dashboard(ctx context.Context, tenantID, storeID uuid.UUID, no
 	}
 	rows.Close()
 	start := day.AddDate(0, 0, -6)
-	dailyRows, err := s.db.Query(ctx, `SELECT created_at::date,COALESCE(SUM(total_amount),0)::bigint FROM sales WHERE tenant_id=$1 AND store_id=$2 AND status='posted' AND created_at >= $3 AND created_at < $4 GROUP BY created_at::date ORDER BY created_at::date`, tenantID, storeID, start, tomorrow)
+	dailyRows, err := s.db.Query(ctx, `SELECT created_at::date,COALESCE(SUM(net_amount),0)::bigint FROM sales WHERE tenant_id=$1 AND store_id=$2 AND status='posted' AND created_at >= $3 AND created_at < $4 GROUP BY created_at::date ORDER BY created_at::date`, tenantID, storeID, start, tomorrow)
 	if err != nil {
 		return out, err
 	}

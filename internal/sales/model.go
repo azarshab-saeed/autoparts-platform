@@ -26,6 +26,7 @@ type CreateSaleCommand struct {
 	ActorRole            string           `json:"-"`
 	WarehouseID          uuid.UUID        `json:"warehouse_id"`
 	CustomerID           *uuid.UUID       `json:"customer_id,omitempty"`
+	InvoiceMode          string           `json:"invoice_mode,omitempty"`
 	PaymentMethod        string           `json:"payment_method,omitempty"` // legacy single-method input
 	Payments             []PaymentPart    `json:"payments,omitempty"`
 	IdempotencyKey       string           `json:"-"`
@@ -37,13 +38,19 @@ type CreateSaleCommand struct {
 }
 
 type Sale struct {
-	ID             uuid.UUID `json:"id"`
-	GrossAmount    int64     `json:"gross_amount"`
-	DiscountAmount int64     `json:"discount_amount"`
-	TotalAmount    int64     `json:"total_amount"`
-	PaidAmount     int64     `json:"paid_amount"`
-	DueAmount      int64     `json:"due_amount"`
-	Status         string    `json:"status"`
+	ID                   uuid.UUID `json:"id"`
+	GrossAmount          int64     `json:"gross_amount"`
+	DiscountAmount       int64     `json:"discount_amount"`
+	NetAmount            int64     `json:"net_amount"`
+	TaxableAmount        int64     `json:"taxable_amount"`
+	ExemptAmount         int64     `json:"exempt_amount"`
+	TaxAmount            int64     `json:"tax_amount"`
+	TotalAmount          int64     `json:"total_amount"`
+	PaidAmount           int64     `json:"paid_amount"`
+	DueAmount            int64     `json:"due_amount"`
+	InvoiceMode          string    `json:"invoice_mode"`
+	InvoiceNumberDisplay string    `json:"invoice_number_display,omitempty"`
+	Status               string    `json:"status"`
 }
 
 type SaleLine struct {
@@ -72,19 +79,34 @@ type SaleLine struct {
 	MarginBPS           *int       `json:"margin_bps,omitempty"`
 	MarginGuardBPS      *int       `json:"margin_guard_bps,omitempty"`
 	BelowMarginGuard    bool       `json:"below_margin_guard"`
+	TaxCategory         string     `json:"tax_category"`
+	TaxCode             *string    `json:"tax_code,omitempty"`
+	TaxRateName         *string    `json:"tax_rate_name,omitempty"`
+	TaxRateBPS          int        `json:"tax_rate_bps"`
+	TaxBaseAmount       int64      `json:"tax_base_amount"`
+	TaxAmount           int64      `json:"tax_amount"`
+	TotalWithTax        int64      `json:"total_with_tax"`
+	TaxExemptionReason  *string    `json:"tax_exemption_reason,omitempty"`
 }
 
 type SaleDetail struct {
-	ID             uuid.UUID  `json:"id"`
-	CustomerID     *uuid.UUID `json:"customer_id,omitempty"`
-	CustomerName   string     `json:"customer_name,omitempty"`
-	WarehouseID    uuid.UUID  `json:"warehouse_id"`
-	GrossAmount    int64      `json:"gross_amount"`
-	DiscountAmount int64      `json:"discount_amount"`
-	TotalAmount    int64      `json:"total_amount"`
-	PaidAmount     int64      `json:"paid_amount"`
-	DueAmount      int64      `json:"due_amount"`
-	Status         string     `json:"status"`
-	CreatedAt      string     `json:"created_at"`
-	Items          []SaleLine `json:"items"`
+	ID                   uuid.UUID  `json:"id"`
+	CustomerID           *uuid.UUID `json:"customer_id,omitempty"`
+	CustomerName         string     `json:"customer_name,omitempty"`
+	WarehouseID          uuid.UUID  `json:"warehouse_id"`
+	GrossAmount          int64      `json:"gross_amount"`
+	DiscountAmount       int64      `json:"discount_amount"`
+	NetAmount            int64      `json:"net_amount"`
+	TaxableAmount        int64      `json:"taxable_amount"`
+	ExemptAmount         int64      `json:"exempt_amount"`
+	TaxAmount            int64      `json:"tax_amount"`
+	TotalAmount          int64      `json:"total_amount"`
+	PaidAmount           int64      `json:"paid_amount"`
+	DueAmount            int64      `json:"due_amount"`
+	InvoiceMode          string     `json:"invoice_mode"`
+	InvoiceState         string     `json:"invoice_state"`
+	InvoiceNumberDisplay string     `json:"invoice_number_display,omitempty"`
+	Status               string     `json:"status"`
+	CreatedAt            string     `json:"created_at"`
+	Items                []SaleLine `json:"items"`
 }

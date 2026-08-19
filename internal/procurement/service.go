@@ -352,11 +352,11 @@ func (s *Service) Receive(ctx context.Context, cmd ReceiveCommand) (ReceiveResul
 	sellerKey := "network-procurement-seller:" + order.ID.String()
 	buyerKey := "network-procurement-buyer:" + order.ID.String()
 
-	if _, err = tx.Exec(ctx, `INSERT INTO sales(id,tenant_id,store_id,warehouse_id,customer_id,status,gross_amount,discount_amount,total_amount,paid_amount,due_amount,idempotency_key) VALUES($1,$2,$3,$4,$5,'posted',$6,0,$6,0,$6,$7)`, sellerSaleID, sellerTenantID, order.SellerStoreID, order.SellerWarehouseID, customerID, order.TotalAmount, sellerKey); err != nil {
+	if _, err = tx.Exec(ctx, `INSERT INTO sales(id,tenant_id,store_id,warehouse_id,customer_id,status,gross_amount,discount_amount,net_amount,total_amount,paid_amount,due_amount,idempotency_key) VALUES($1,$2,$3,$4,$5,'posted',$6,0,$6,$6,0,$6,$7)`, sellerSaleID, sellerTenantID, order.SellerStoreID, order.SellerWarehouseID, customerID, order.TotalAmount, sellerKey); err != nil {
 		return ReceiveResult{}, err
 	}
 	sellerCOGS := int64(math.Round(order.Qty * float64(sellerAvgCost)))
-	if _, err = tx.Exec(ctx, `INSERT INTO sale_items(tenant_id,sale_id,product_id,qty,unit_price,unit_cost,line_total,gross_line_total,discount_amount,price_source) VALUES($1,$2,$3,$4,$5,$6,$7,$7,0,'network_procurement')`, sellerTenantID, sellerSaleID, order.SellerProductID, order.Qty, order.UnitPrice, sellerAvgCost, order.TotalAmount); err != nil {
+	if _, err = tx.Exec(ctx, `INSERT INTO sale_items(tenant_id,sale_id,product_id,qty,unit_price,unit_cost,line_total,gross_line_total,discount_amount,price_source,tax_base_amount,total_with_tax) VALUES($1,$2,$3,$4,$5,$6,$7,$7,0,'network_procurement',$7,$7)`, sellerTenantID, sellerSaleID, order.SellerProductID, order.Qty, order.UnitPrice, sellerAvgCost, order.TotalAmount); err != nil {
 		return ReceiveResult{}, err
 	}
 	ct, err := tx.Exec(ctx, `UPDATE inventory_balances SET on_hand=on_hand-$4,reserved=reserved-$4,updated_at=now() WHERE tenant_id=$1 AND warehouse_id=$2 AND product_id=$3 AND on_hand >= $4 AND reserved >= $4`, sellerTenantID, order.SellerWarehouseID, order.SellerProductID, order.Qty)

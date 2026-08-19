@@ -16,20 +16,32 @@ type Service struct{ db *pgxpool.Pool }
 func NewService(db *pgxpool.Pool) *Service { return &Service{db: db} }
 
 type Customer struct {
-	ID            uuid.UUID  `json:"id"`
-	Name          string     `json:"name"`
-	Phone         *string    `json:"phone,omitempty"`
-	Code          *string    `json:"code,omitempty"`
-	Notes         *string    `json:"notes,omitempty"`
-	PriceListID   *uuid.UUID `json:"price_list_id,omitempty"`
-	PriceListName *string    `json:"price_list_name,omitempty"`
+	ID                 uuid.UUID  `json:"id"`
+	Name               string     `json:"name"`
+	Phone              *string    `json:"phone,omitempty"`
+	Code               *string    `json:"code,omitempty"`
+	Notes              *string    `json:"notes,omitempty"`
+	PriceListID        *uuid.UUID `json:"price_list_id,omitempty"`
+	PriceListName      *string    `json:"price_list_name,omitempty"`
+	LegalType          *string    `json:"legal_type,omitempty"`
+	NationalID         *string    `json:"national_id,omitempty"`
+	EconomicCode       *string    `json:"economic_code,omitempty"`
+	RegistrationNumber *string    `json:"registration_number,omitempty"`
+	PostalCode         *string    `json:"postal_code,omitempty"`
+	Address            *string    `json:"address,omitempty"`
 }
 type CreateCustomer struct {
-	Name        string     `json:"name"`
-	Phone       *string    `json:"phone,omitempty"`
-	Code        *string    `json:"code,omitempty"`
-	Notes       *string    `json:"notes,omitempty"`
-	PriceListID *uuid.UUID `json:"price_list_id,omitempty"`
+	Name               string     `json:"name"`
+	Phone              *string    `json:"phone,omitempty"`
+	Code               *string    `json:"code,omitempty"`
+	Notes              *string    `json:"notes,omitempty"`
+	PriceListID        *uuid.UUID `json:"price_list_id,omitempty"`
+	LegalType          *string    `json:"legal_type,omitempty"`
+	NationalID         *string    `json:"national_id,omitempty"`
+	EconomicCode       *string    `json:"economic_code,omitempty"`
+	RegistrationNumber *string    `json:"registration_number,omitempty"`
+	PostalCode         *string    `json:"postal_code,omitempty"`
+	Address            *string    `json:"address,omitempty"`
 }
 type Page struct {
 	Items      []Customer `json:"items"`
@@ -43,7 +55,7 @@ func (s *Service) Create(ctx context.Context, tenantID, storeID uuid.UUID, in Cr
 		}
 	}
 	var c Customer
-	err := s.db.QueryRow(ctx, `INSERT INTO customers(tenant_id,store_id,name,phone,code,notes,price_list_id) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING id,name,phone,code,notes,price_list_id`, tenantID, storeID, strings.TrimSpace(in.Name), in.Phone, in.Code, in.Notes, in.PriceListID).Scan(&c.ID, &c.Name, &c.Phone, &c.Code, &c.Notes, &c.PriceListID)
+	err := s.db.QueryRow(ctx, `INSERT INTO customers(tenant_id,store_id,name,phone,code,notes,price_list_id,legal_type,national_id,economic_code,registration_number,postal_code,address) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING id,name,phone,code,notes,price_list_id,legal_type,national_id,economic_code,registration_number,postal_code,address`, tenantID, storeID, strings.TrimSpace(in.Name), in.Phone, in.Code, in.Notes, in.PriceListID, in.LegalType, in.NationalID, in.EconomicCode, in.RegistrationNumber, in.PostalCode, in.Address).Scan(&c.ID, &c.Name, &c.Phone, &c.Code, &c.Notes, &c.PriceListID, &c.LegalType, &c.NationalID, &c.EconomicCode, &c.RegistrationNumber, &c.PostalCode, &c.Address)
 	if err != nil {
 		return Customer{}, err
 	}
@@ -54,7 +66,7 @@ func (s *Service) Create(ctx context.Context, tenantID, storeID uuid.UUID, in Cr
 }
 func (s *Service) List(ctx context.Context, tenantID, storeID uuid.UUID, q string, limit, offset int) (Page, error) {
 	pat := "%" + strings.ToLower(strings.TrimSpace(q)) + "%"
-	rows, err := s.db.Query(ctx, `SELECT c.id,c.name,c.phone,c.code,c.notes,CASE WHEN pl.id IS NULL THEN NULL ELSE c.price_list_id END,pl.name FROM customers c LEFT JOIN price_lists pl ON pl.id=c.price_list_id AND pl.tenant_id=c.tenant_id AND pl.store_id=c.store_id AND pl.active WHERE c.tenant_id=$1 AND c.store_id=$2 AND c.deleted_at IS NULL AND ($3='%%' OR lower(c.name) LIKE $3 OR lower(COALESCE(c.phone,'')) LIKE $3 OR lower(COALESCE(c.code,'')) LIKE $3) ORDER BY c.name,c.id LIMIT $4 OFFSET $5`, tenantID, storeID, pat, limit+1, offset)
+	rows, err := s.db.Query(ctx, `SELECT c.id,c.name,c.phone,c.code,c.notes,CASE WHEN pl.id IS NULL THEN NULL ELSE c.price_list_id END,pl.name,c.legal_type,c.national_id,c.economic_code,c.registration_number,c.postal_code,c.address FROM customers c LEFT JOIN price_lists pl ON pl.id=c.price_list_id AND pl.tenant_id=c.tenant_id AND pl.store_id=c.store_id AND pl.active WHERE c.tenant_id=$1 AND c.store_id=$2 AND c.deleted_at IS NULL AND ($3='%%' OR lower(c.name) LIKE $3 OR lower(COALESCE(c.phone,'')) LIKE $3 OR lower(COALESCE(c.code,'')) LIKE $3) ORDER BY c.name,c.id LIMIT $4 OFFSET $5`, tenantID, storeID, pat, limit+1, offset)
 	if err != nil {
 		return Page{}, err
 	}
@@ -62,7 +74,7 @@ func (s *Service) List(ctx context.Context, tenantID, storeID uuid.UUID, q strin
 	out := Page{Items: make([]Customer, 0, limit)}
 	for rows.Next() {
 		var c Customer
-		if err = rows.Scan(&c.ID, &c.Name, &c.Phone, &c.Code, &c.Notes, &c.PriceListID, &c.PriceListName); err != nil {
+		if err = rows.Scan(&c.ID, &c.Name, &c.Phone, &c.Code, &c.Notes, &c.PriceListID, &c.PriceListName, &c.LegalType, &c.NationalID, &c.EconomicCode, &c.RegistrationNumber, &c.PostalCode, &c.Address); err != nil {
 			return Page{}, err
 		}
 		out.Items = append(out.Items, c)
@@ -81,7 +93,7 @@ func (s *Service) AssignPriceList(ctx context.Context, tenantID, storeID, custom
 		}
 	}
 	var c Customer
-	err := s.db.QueryRow(ctx, `UPDATE customers SET price_list_id=$4,updated_at=now() WHERE id=$3 AND tenant_id=$1 AND store_id=$2 AND deleted_at IS NULL RETURNING id,name,phone,code,notes,price_list_id`, tenantID, storeID, customerID, priceListID).Scan(&c.ID, &c.Name, &c.Phone, &c.Code, &c.Notes, &c.PriceListID)
+	err := s.db.QueryRow(ctx, `UPDATE customers SET price_list_id=$4,updated_at=now() WHERE id=$3 AND tenant_id=$1 AND store_id=$2 AND deleted_at IS NULL RETURNING id,name,phone,code,notes,price_list_id,legal_type,national_id,economic_code,registration_number,postal_code,address`, tenantID, storeID, customerID, priceListID).Scan(&c.ID, &c.Name, &c.Phone, &c.Code, &c.Notes, &c.PriceListID, &c.LegalType, &c.NationalID, &c.EconomicCode, &c.RegistrationNumber, &c.PostalCode, &c.Address)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Customer{}, errors.New("customer not found")
 	}

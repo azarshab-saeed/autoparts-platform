@@ -1,6 +1,7 @@
 import { addMockExpense, addMockPartyBalance, applyMockAdjustment, applyMockPurchase, applyMockPurchaseReturn, applyMockReorder, applyMockSaleReturn, applyMockSettlement, getMockCustomerBalances, getMockExpenseCategories, getMockExpenses, getMockInventory, getMockPartyStatement, getMockProfitLoss, getMockSupplierBalances, mockCustomers, mockProducts, mockPurchaseDetail, mockSaleDetail, mockSuppliers, mockNetworkResults, getMockNetworkProfile, setMockNetworkProfile, getMockStoreOffers, setMockStoreOffer, createMockReservation, getMockBuyerReservations, getMockStoreReservations, cancelMockReservation, transitionMockReservation, fulfillMockReservation, getMockDashboardSummary, getMockSalesHistory, getMockPurchasesHistory, getMockInventoryInsights, getMockCashReport, closeMockBusinessDay } from "./mock";
 import type {
   Customer,
+  CustomerTaxIdentity,
   InventoryAdjustmentResult,
   InventoryStock,
   MeResponse,
@@ -17,7 +18,7 @@ import type {
   SaleItem,
   SettlementResult,
   Supplier,
-  UserSession, NetworkSearchResult, NetworkStoreOffer, StoreNetworkProfile, NetworkReservation, NetworkReservationStatus, ReservationFulfillmentResult, Expense, ExpenseCategory, PartyStatement, ProfitLoss, CashReport, DailyClosing, DashboardSummary, InventoryInsightReport, PagedResult, PurchaseHistoryItem, SaleHistoryItem, NetworkProcurement, ProcurementReceiveResult, VehicleMake, ProductSearchMetadata, ProductSearchTerm, ProductFitmentInput, AuditLogEntry, ProductImportRow, ProductImportResult, EdgePairing, EdgeDevice, BankAccount, BankLedger, StoreCheck, CheckSummary, CheckDirection, CheckAction, MaturityAverageResult, FinanceIntelligenceDashboard, BankStatementInput, BankStatementImportResult, BankStatementLine, ReconciliationCandidate, ReconciliationMatch, PriceList, PricingSettings, PriceBreak, ProductPricing, PricingQuote
+  UserSession, NetworkSearchResult, NetworkStoreOffer, StoreNetworkProfile, NetworkReservation, NetworkReservationStatus, ReservationFulfillmentResult, Expense, ExpenseCategory, PartyStatement, ProfitLoss, CashReport, DailyClosing, DashboardSummary, InventoryInsightReport, PagedResult, PurchaseHistoryItem, SaleHistoryItem, NetworkProcurement, ProcurementReceiveResult, VehicleMake, ProductSearchMetadata, ProductSearchTerm, ProductFitmentInput, AuditLogEntry, ProductImportRow, ProductImportResult, EdgePairing, EdgeDevice, BankAccount, BankLedger, StoreCheck, CheckSummary, CheckDirection, CheckAction, MaturityAverageResult, FinanceIntelligenceDashboard, BankStatementInput, BankStatementImportResult, BankStatementLine, ReconciliationCandidate, ReconciliationMatch, PriceList, PricingSettings, PriceBreak, ProductPricing, PricingQuote, InvoiceMode, TaxSettings, TaxRate, TaxRateInput, TaxQuote, ProductTaxRow, InvoiceTaxListItem, OfficialInvoicePrintData, InvoiceAction
 } from "./types";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
@@ -34,6 +35,9 @@ let mockPriceLists: PriceList[] = [
   {id:"mock-wholesale",code:"wholesale",name:"عمده",is_default:false,active:true},
 ];
 let mockPricingSettings:PricingSettings={min_margin_bps:1000,cashier_may_override:true};
+let mockTaxSettings:TaxSettings={legal_name:"فروشگاه نمونه",national_id:"",economic_code:"",registration_number:"",postal_code:"",province:"",city:"",address:"",phone:"",tax_enabled:false,tax_on_normal_sales:false,calculation_mode:"exclusive",default_invoice_mode:"normal",default_tax_code:"",official_series:"INV",next_official_number:1,invoice_number_width:6};
+let mockTaxRates:TaxRate[]=[];
+const mockProductTaxCodes:Record<string,string>={};
 const baseUnitFor=(p:Product):ProductUnit=>p.units?.find(u=>u.is_base)??{id:`mock-base-${p.id}`,code:p.unit||"pcs",name:p.unit==="pair"?"جفت":"عدد",factor_to_base:1,barcode:p.barcode,is_base:true,allow_sale:true,allow_purchase:true,active:true};
 const unitsFor=(p:Product):ProductUnit[]=>p.units?.length?p.units:[baseUnitFor(p)];
 const priceBreakKey=(productId:string,unitId?:string)=>unitId?`${productId}:${unitId}`:productId;
@@ -166,6 +170,51 @@ export async function quotePricing(session:UserSession,items:{product_id:string;
   return request<PricingQuote>("/v1/pricing/quote",{method:"POST",body:JSON.stringify({warehouse_id:session.warehouseId,customer_id:customerId||null,items})},session.token);
 }
 
+export async function getTaxSettings(session:UserSession):Promise<TaxSettings>{
+  if(MOCK_MODE)return{...mockTaxSettings};
+  return request<TaxSettings>("/v1/tax/settings",{},session.token);
+}
+export async function saveTaxSettings(session:UserSession,input:TaxSettings):Promise<TaxSettings>{
+  if(MOCK_MODE){mockTaxSettings={...input};return{...mockTaxSettings};}
+  return request<TaxSettings>("/v1/tax/settings",{method:"PUT",body:JSON.stringify(input)},session.token);
+}
+export async function getTaxRates(session:UserSession):Promise<TaxRate[]>{
+  if(MOCK_MODE)return mockTaxRates.map(x=>({...x}));
+  const out=await request<{items:TaxRate[]}>("/v1/tax/rates",{},session.token);return out.items;
+}
+export async function upsertTaxRate(session:UserSession,input:TaxRateInput):Promise<TaxRate>{
+  if(MOCK_MODE){const idx=mockTaxRates.findIndex(x=>x.code===input.code&&x.effective_from===input.effective_from);const row:TaxRate={id:idx>=0?mockTaxRates[idx].id:crypto.randomUUID(),...input};if(idx>=0)mockTaxRates[idx]=row;else mockTaxRates.unshift(row);return{...row};}
+  return request<TaxRate>("/v1/tax/rates",{method:"POST",body:JSON.stringify(input)},session.token);
+}
+export async function getProductTaxProfiles(session:UserSession,q=""):Promise<ProductTaxRow[]>{
+  if(MOCK_MODE){const needle=q.trim().toLowerCase();return mockProducts.filter(p=>!needle||[p.title,p.sku,p.brand].filter(Boolean).some(v=>String(v).toLowerCase().includes(needle))).slice(0,50).map(p=>{const code=mockProductTaxCodes[p.id]||mockTaxSettings.default_tax_code;const rate=mockTaxRates.find(r=>r.code===code&&r.active);return{product_id:p.id,title:p.title,sku:p.sku,explicit_tax_code:mockProductTaxCodes[p.id],effective_tax_code:code||undefined,rate_name:rate?.name,category:rate?.category,rate_bps:rate?.rate_bps||0};});}
+  const out=await request<{items:ProductTaxRow[]}>(`/v1/tax/products?q=${encodeURIComponent(q)}&limit=50`,{},session.token);return out.items;
+}
+export async function assignProductTaxCode(session:UserSession,productId:string,taxCode:string):Promise<{product_id:string;tax_code:string}>{
+  if(MOCK_MODE){mockProductTaxCodes[productId]=taxCode.trim();return{product_id:productId,tax_code:taxCode.trim()};}
+  return request<{product_id:string;tax_code:string}>(`/v1/tax/products/${productId}`,{method:"PUT",body:JSON.stringify({tax_code:taxCode})},session.token);
+}
+export async function updateCustomerTaxIdentity(session:UserSession,customerId:string,input:{legal_type?:string;national_id?:string;economic_code?:string;registration_number?:string;postal_code?:string;address?:string}):Promise<CustomerTaxIdentity>{
+  if(MOCK_MODE){const c=mockCustomers.find(x=>x.id===customerId);if(!c)throw new Error("مشتری پیدا نشد");Object.assign(c,input);return{customer_id:c.id,name:c.name,legal_type:c.legal_type,national_id:c.national_id,economic_code:c.economic_code,registration_number:c.registration_number,postal_code:c.postal_code,address:c.address};}
+  return request<CustomerTaxIdentity>(`/v1/tax/customers/${customerId}`,{method:"PUT",body:JSON.stringify(input)},session.token);
+}
+export async function quoteTax(session:UserSession,invoiceMode:InvoiceMode,customerId:string|null,items:{product_id:string;amount:number}[]):Promise<TaxQuote>{
+  if(MOCK_MODE){let net=0,tax=0,taxable=0,exempt=0;const applied=mockTaxSettings.tax_enabled&&(invoiceMode==="official"||mockTaxSettings.tax_on_normal_sales);const lines=items.map(i=>{const code=mockProductTaxCodes[i.product_id]||mockTaxSettings.default_tax_code;const rate=mockTaxRates.filter(r=>r.code===code&&r.active).sort((a,b)=>b.effective_from.localeCompare(a.effective_from))[0];if(!applied){net+=i.amount;return{product_id:i.product_id,category:"not_applied",tax_rate_bps:0,tax_base_amount:i.amount,tax_amount:0,total_with_tax:i.amount};}if(!rate)throw new Error(`کد/نرخ مالیاتی برای کالا تنظیم نشده است.`);const taxableRow=rate.category==="taxable";let base=i.amount,tx=0,total=i.amount;if(taxableRow&&rate.rate_bps>0){if(mockTaxSettings.calculation_mode==="inclusive"){base=Math.round(i.amount*10000/(10000+rate.rate_bps));tx=i.amount-base;}else{tx=Math.round(i.amount*rate.rate_bps/10000);total=i.amount+tx;}}net+=base;tax+=tx;if(taxableRow)taxable+=base;else exempt+=base;return{product_id:i.product_id,category:rate.category,tax_code:code,tax_rate_name:rate.name,tax_rate_bps:rate.rate_bps,tax_base_amount:base,tax_amount:tx,total_with_tax:total,exemption_reason:rate.exemption_reason};});return{invoice_mode:invoiceMode,calculation_mode:mockTaxSettings.calculation_mode,applied,net_amount:net,taxable_amount:taxable,exempt_amount:exempt,tax_amount:tax,total_amount:net+tax,seller_ready:Boolean(mockTaxSettings.legal_name&&mockTaxSettings.national_id),buyer_ready:!customerId||Boolean(mockCustomers.find(c=>c.id===customerId)?.national_id),warnings:[],items:lines};}
+  return request<TaxQuote>("/v1/tax/quote",{method:"POST",body:JSON.stringify({customer_id:customerId||null,invoice_mode:invoiceMode,items})},session.token);
+}
+export async function getTaxInvoices(session:UserSession,from:string,to:string,mode="all",limit=100,offset=0):Promise<PagedResult<InvoiceTaxListItem>>{
+  if(MOCK_MODE)return{items:[],total:0,next_cursor:""};
+  return request<PagedResult<InvoiceTaxListItem>>(`/v1/tax/invoices?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}&mode=${encodeURIComponent(mode)}&limit=${limit}&offset=${offset}`,{},session.token);
+}
+export async function getInvoicePrintData(session:UserSession,saleId:string):Promise<OfficialInvoicePrintData>{
+  if(MOCK_MODE)throw new Error("داده چاپ رسمی در حالت نمونه موجود نیست");
+  return request<OfficialInvoicePrintData>(`/v1/tax/invoices/${saleId}/print-data`,{},session.token);
+}
+export async function requestInvoiceAction(session:UserSession,saleId:string,actionType:"correction"|"cancellation",reason:string):Promise<InvoiceAction>{
+  if(MOCK_MODE)return{id:crypto.randomUUID(),sale_id:saleId,action_type:actionType,reason,status:"requested",created_at:new Date().toISOString()};
+  return request<InvoiceAction>(`/v1/tax/invoices/${saleId}/actions`,{method:"POST",body:JSON.stringify({action_type:actionType,reason})},session.token);
+}
+
 export async function searchSuppliers(q: string, session: UserSession): Promise<Supplier[]> {
   if (MOCK_MODE) {
     const s = q.trim();
@@ -175,14 +224,14 @@ export async function searchSuppliers(q: string, session: UserSession): Promise<
   return out.items;
 }
 
-export async function postSale(session: UserSession, items: SaleItem[], customerId: string | null, paymentMethod: "cash"|"card"|"credit", payments?: PaymentPart[]) {
+export async function postSale(session: UserSession, items: SaleItem[], customerId: string | null, paymentMethod: "cash"|"card"|"credit", payments?: PaymentPart[], invoiceMode: InvoiceMode = "normal") {
   if (MOCK_MODE) {
     await new Promise(r => setTimeout(r, 350));
     const total = items.reduce((s, i) => s + i.qty * i.unitPrice, 0);
     const paid = payments ? payments.reduce((s,p)=>s+p.amount,0) : (paymentMethod === "credit" ? 0 : total);
     const due = Math.max(0, total-paid);
     if (customerId && due > 0) addMockPartyBalance("customer", customerId, due);
-    return { id: crypto.randomUUID(), total_amount: total, paid_amount: paid, due_amount: due, status: "posted" };
+    return { id: crypto.randomUUID(), net_amount: total, tax_amount: 0, total_amount: total, paid_amount: paid, due_amount: due, invoice_mode: invoiceMode, invoice_number_display: invoiceMode==="official"?`INV-${String(mockTaxSettings.next_official_number++).padStart(mockTaxSettings.invoice_number_width,"0")}`:undefined, status: "posted" };
   }
   const idempotencyKey = crypto.randomUUID();
   return request<any>("/v1/sales", {
@@ -191,6 +240,7 @@ export async function postSale(session: UserSession, items: SaleItem[], customer
     body: JSON.stringify({
       warehouse_id: session.warehouseId,
       customer_id: customerId,
+      invoice_mode: invoiceMode,
       payment_method: paymentMethod,
       ...(payments ? { payments } : {}),
       items: items.map(i => ({ product_id: i.product.id, product_unit_id: i.unit.id, qty: i.qty, unit_price: i.unitPrice, ...(i.overrideReason ? { override_reason: i.overrideReason } : {}) }))

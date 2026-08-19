@@ -89,7 +89,11 @@ export type ProductImportResult = {
   rows: { row_number: number; product_id: string; product_action: "created"|"updated"; inventory_action: "initialized"|"preserved"|"none"; offer_action: "upserted"|"none"; note?: string }[];
 };
 
-export type Customer = { id: string; name: string; phone?: string; code?: string; price_list_id?: string; price_list_name?: string };
+export type CustomerTaxIdentity = { customer_id:string; name:string; legal_type?:"natural"|"legal"|"other"; national_id?:string; economic_code?:string; registration_number?:string; postal_code?:string; address?:string };
+export type Customer = {
+  id: string; name: string; phone?: string; code?: string; price_list_id?: string; price_list_name?: string;
+  legal_type?: "natural"|"legal"|"other"; national_id?: string; economic_code?: string; registration_number?: string; postal_code?: string; address?: string;
+};
 export type Supplier = { id: string; name: string; phone?: string; code?: string; notes?: string };
 
 export type InventoryStock = {
@@ -135,6 +139,23 @@ export type ProductUnitPricing = { product_unit_id:string; code:string; name:str
 export type ProductPricing = { product_id:string; title:string; sku?:string; brand?:string; breaks:PriceBreak[]; units:ProductUnitPricing[] };
 export type PricingQuoteLine = { product_id:string; product_unit_id:string; unit_code:string; unit_name:string; factor_to_base:number; qty:number; price_list_id?:string; price_list_name?:string; unit_price:number; price_source:string; min_allowed_price:number };
 export type PricingQuote = { price_list_id:string; price_list_name:string; min_margin_bps:number; cashier_may_override:boolean; items:PricingQuoteLine[] };
+
+
+export type InvoiceMode = "normal"|"official";
+export type TaxCategory = "taxable"|"exempt"|"non_taxable";
+export type TaxSettings = {
+  legal_name:string; national_id:string; economic_code:string; registration_number:string; postal_code:string; province:string; city:string; address:string; phone:string;
+  tax_enabled:boolean; tax_on_normal_sales:boolean; calculation_mode:"exclusive"|"inclusive"; default_invoice_mode:InvoiceMode; default_tax_code:string; official_series:string; next_official_number:number; invoice_number_width:number;
+};
+export type TaxRate = { id:string; code:string; name:string; category:TaxCategory; rate_bps:number; effective_from:string; effective_to?:string; exemption_reason?:string; active:boolean };
+export type TaxRateInput = Omit<TaxRate,"id">;
+export type TaxQuoteLine = { product_id:string; category:string; tax_code?:string; tax_rate_name?:string; tax_rate_bps:number; tax_base_amount:number; tax_amount:number; total_with_tax:number; exemption_reason?:string };
+export type TaxQuote = { invoice_mode:InvoiceMode; calculation_mode:"exclusive"|"inclusive"; applied:boolean; net_amount:number; taxable_amount:number; exempt_amount:number; tax_amount:number; total_amount:number; seller_ready:boolean; buyer_ready:boolean; warnings:string[]; items:TaxQuoteLine[] };
+export type ProductTaxRow = { product_id:string; title:string; sku?:string; explicit_tax_code?:string; effective_tax_code?:string; rate_name?:string; category?:string; rate_bps:number };
+export type InvoiceTaxListItem = { sale_id:string; invoice_mode:InvoiceMode; invoice_state:string; invoice_number_display?:string; customer_id?:string; customer_name?:string; net_amount:number; tax_amount:number; total_amount:number; created_at:string };
+export type OfficialInvoicePrintLine = { product_id:string; title:string; unit_name:string; qty:number; unit_price:number; net_amount:number; tax_category:string; tax_code?:string; tax_rate_name?:string; tax_rate_bps:number; tax_amount:number; total_with_tax:number; exemption_reason?:string };
+export type OfficialInvoicePrintData = { sale_id:string; invoice_mode:InvoiceMode; invoice_kind:string; invoice_state:string; invoice_number_display?:string; issued_at?:string; seller:Record<string,unknown>; buyer:Record<string,unknown>; calculation_mode:string; gross_amount:number; discount_amount:number; net_amount:number; taxable_amount:number; exempt_amount:number; tax_amount:number; total_amount:number; paid_amount:number; due_amount:number; items:OfficialInvoicePrintLine[] };
+export type InvoiceAction = { id:string; sale_id:string; action_type:"correction"|"cancellation"; reason:string; status:string; actor_user_id?:string; replacement_sale_id?:string; created_at:string };
 
 export type PaymentPart = { method: "cash"|"card"; amount: number };
 export type PartyBalance = { id: string; code?: string; name: string; phone?: string; balance: number };
@@ -195,10 +216,11 @@ export type ReturnableLine = {
   margin_bps?: number;
   margin_guard_bps?: number;
   below_margin_guard?: boolean;
+  tax_category?: string; tax_code?: string; tax_rate_name?: string; tax_rate_bps?: number; tax_base_amount?: number; tax_amount?: number; total_with_tax?: number; tax_exemption_reason?: string;
 };
 export type SaleDetail = {
   id: string; customer_id?: string; customer_name?: string; warehouse_id: string;
-  gross_amount: number; discount_amount: number; total_amount: number; paid_amount: number; due_amount: number; status: string; created_at: string; items: ReturnableLine[];
+  gross_amount: number; discount_amount: number; net_amount?: number; taxable_amount?: number; exempt_amount?: number; tax_amount?: number; total_amount: number; paid_amount: number; due_amount: number; invoice_mode?: InvoiceMode; invoice_kind?: string; invoice_state?: string; invoice_number_display?: string; invoice_issued_at?: string; status: string; created_at: string; items: ReturnableLine[];
 };
 export type PurchaseDetail = {
   id: string; supplier_id: string; supplier_name: string; warehouse_id: string;
@@ -392,6 +414,10 @@ export type SaleHistoryItem = {
   customer_name?: string;
   gross_amount: number;
   discount_amount: number;
+  net_amount?: number;
+  tax_amount?: number;
+  invoice_mode?: InvoiceMode;
+  invoice_number?: string;
   total_amount: number;
   paid_amount: number;
   due_amount: number;

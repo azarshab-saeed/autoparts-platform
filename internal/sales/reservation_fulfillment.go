@@ -141,7 +141,7 @@ func (s *Service) FulfillReservation(ctx context.Context, cmd FulfillReservation
 
 	saleID := uuid.New()
 	saleIdempotencyKey := "network-reservation:" + cmd.ReservationID.String()
-	if _, err = tx.Exec(ctx, `INSERT INTO sales(id,tenant_id,store_id,warehouse_id,customer_id,status,gross_amount,discount_amount,total_amount,paid_amount,due_amount,idempotency_key) VALUES($1,$2,$3,$4,$5,'posted',$6,0,$6,$7,$8,$9)`, saleID, cmd.TenantID, cmd.StoreID, warehouseID, cmd.CustomerID, total, paid, due, saleIdempotencyKey); err != nil {
+	if _, err = tx.Exec(ctx, `INSERT INTO sales(id,tenant_id,store_id,warehouse_id,customer_id,status,gross_amount,discount_amount,net_amount,total_amount,paid_amount,due_amount,idempotency_key) VALUES($1,$2,$3,$4,$5,'posted',$6,0,$6,$6,$7,$8,$9)`, saleID, cmd.TenantID, cmd.StoreID, warehouseID, cmd.CustomerID, total, paid, due, saleIdempotencyKey); err != nil {
 		return ReservationFulfillment{}, err
 	}
 
@@ -149,7 +149,7 @@ func (s *Service) FulfillReservation(ctx context.Context, cmd FulfillReservation
 	if itemCOGS < 0 {
 		return ReservationFulfillment{}, errors.New("invalid cost of goods sold")
 	}
-	if _, err = tx.Exec(ctx, `INSERT INTO sale_items(tenant_id,sale_id,product_id,qty,unit_price,unit_cost,line_total,gross_line_total,discount_amount,price_source) VALUES($1,$2,$3,$4,$5,$6,$7,$7,0,'network_reservation')`, cmd.TenantID, saleID, productID, qty, unitPrice, avgUnitCost, total); err != nil {
+	if _, err = tx.Exec(ctx, `INSERT INTO sale_items(tenant_id,sale_id,product_id,qty,unit_price,unit_cost,line_total,gross_line_total,discount_amount,price_source,tax_base_amount,total_with_tax) VALUES($1,$2,$3,$4,$5,$6,$7,$7,0,'network_reservation',$7,$7)`, cmd.TenantID, saleID, productID, qty, unitPrice, avgUnitCost, total); err != nil {
 		return ReservationFulfillment{}, err
 	}
 	ct, err := tx.Exec(ctx, `UPDATE inventory_balances SET on_hand=on_hand-$4,reserved=reserved-$4,updated_at=now() WHERE tenant_id=$1 AND warehouse_id=$2 AND product_id=$3 AND on_hand >= $4 AND reserved >= $4`, cmd.TenantID, warehouseID, productID, qty)

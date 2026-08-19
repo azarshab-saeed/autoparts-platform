@@ -8,6 +8,8 @@ type SaleListItem struct {
 	CustomerName     string     `json:"customer_name,omitempty"`
 	GrossAmount      int64      `json:"gross_amount"`
 	DiscountAmount   int64      `json:"discount_amount"`
+	NetAmount        int64      `json:"net_amount"`
+	TaxAmount        int64      `json:"tax_amount"`
 	TotalAmount      int64      `json:"total_amount"`
 	PaidAmount       int64      `json:"paid_amount"`
 	DueAmount        int64      `json:"due_amount"`
@@ -16,6 +18,8 @@ type SaleListItem struct {
 	LineCount        int        `json:"line_count"`
 	TotalQty         float64    `json:"total_qty"`
 	BelowMarginCount int        `json:"below_margin_count"`
+	InvoiceMode      string     `json:"invoice_mode"`
+	InvoiceNumber    string     `json:"invoice_number,omitempty"`
 	NetworkSource    bool       `json:"network_source"`
 }
 
