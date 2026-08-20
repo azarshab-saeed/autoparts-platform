@@ -47,7 +47,7 @@ var (
 	buildTime = "unknown"
 )
 
-const latestMigration = "020_document_templates_barcode_labels.sql"
+const latestMigration = "021_vehicle_notebook.sql"
 
 func main() {
 	log.SetFlags(0)
@@ -88,6 +88,7 @@ func main() {
 
 	public := http.NewServeMux()
 	protected := http.NewServeMux()
+	registerVehicleNotebookRoutes(public, protected, pool)
 
 	public.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		api.WriteJSON(w, http.StatusOK, map[string]any{"status": "ok", "service": "autoparts-api", "version": version})

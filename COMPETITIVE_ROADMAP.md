@@ -12,9 +12,9 @@ The goal is not merely to reproduce Holoo accounting screens. The goal is to rem
 
 ## Current checkpoint
 
-- **Latest completed product checkpoint:** Phase 15.15 — Invoice Designer, Document Templates & Barcode Label Printing
-- **Next product phase:** **Phase 15.16 — Iranian Modian Integration**
-- Phase 15.16 should remain the next phase unless a verified blocker makes it impossible to implement safely.
+- **Latest completed product checkpoint:** Phase 15.16 — Vehicle Notebook, QR Service History & Ownership
+- **Next product phase:** **Phase 15.17 — Management Intelligence & User Performance**
+- Iranian Modian integration is intentionally deferred to the final integration gate after the current product workflow phases.
 - Build/dependency/release hardening tasks are important, but they do **not** replace this product roadmap. They should be handled as blocking fixes, maintenance slices, or release gates unless they materially change product capability.
 
 ---
@@ -41,7 +41,7 @@ We should not spend the roadmap trying to win only by copying a mature accountin
 
 ---
 
-## Competitive status after Phase 15.15
+## Competitive status after Phase 15.16
 
 | Area | Current status | Strategic position |
 |---|---|---|
@@ -77,6 +77,7 @@ We should not spend the roadmap trying to win only by copying a mature accountin
 | Iranian Modian integration | **Missing** | Major migration blocker |
 | Advanced invoice/document designer | **Implemented in 15.15** | Multiple safe templates + immutable sale snapshot |
 | Barcode label template designer | **Implemented in 15.15** | Multi-unit labels, batch printing and Store Edge/ZPL |
+| Vehicle notebook / QR service history | **Implemented in 15.16** | Store + mechanic + owner continuity with privacy-safe QR |
 | User performance / anomaly intelligence | Limited | Opportunity to exceed traditional software |
 
 ---
@@ -356,9 +357,36 @@ The designer intentionally remains block/configuration based. It does not store 
 
 ---
 
-## Phase 15.16 — Iranian Modian Integration
+## Phase 15.16 — Vehicle Notebook, QR Service History & Ownership
 
-**Status:** NEXT
+**Status:** DONE
+
+### Objective
+
+Replace the paper notebook habit with a fast digital history that works for store staff, mechanics and vehicle owners without turning daily work into form filling.
+
+### Delivered
+
+- one stable QR token per vehicle;
+- store search by plate, VIN, owner phone/name or vehicle text;
+- three primary actions: service, part and history;
+- mileage + date in the primary capture flow, with optional notes and next-service mileage/date;
+- mechanic entry by QR without requiring tenant/store membership;
+- privacy-safe owner page that does not expose owner name, phone or VIN;
+- owner mileage capture protected by a six-digit owner code;
+- visible distinction between owner-reported mileage and store/mechanic history;
+- owner code rotation for lost/shared codes;
+- QR generation and mobile-first views.
+
+### UX rule
+
+The common flow must remain **QR -> one action -> a few fields -> save**. Advanced fields stay optional.
+
+---
+
+## Phase 15.18 — Iranian Modian Integration
+
+**Status:** PLANNED — FINAL INTEGRATION GATE
 
 ### Objective
 
@@ -494,8 +522,9 @@ Unless this document is intentionally revised, continue in this order:
 15.14   Tax, VAT & Official Invoicing Foundation  DONE
 15.14.1 Tax invoice date-range SQL hotfix          DONE
 15.15   Invoice Designer + Barcode Label Printing DONE
-15.16   Iranian Modian Integration                NEXT
-15.17   Management Intelligence & User Performance PLANNED
+15.16   Vehicle Notebook + QR Service History     DONE
+15.17   Management Intelligence & User Performance NEXT
+15.18   Iranian Modian Integration                PLANNED (FINAL)
 ```
 
 If a future session proposes a different next product phase, it should first explain which verified blocker or changed product priority justifies changing this sequence, then update this file in the same change.
