@@ -333,6 +333,7 @@ export type ReservationFulfillmentResult = {
   paid_amount: number;
   due_amount: number;
   status: string;
+  pending_trade_request_id?: string;
 };
 export type NetworkReservation = {
   id: string;
@@ -346,6 +347,10 @@ export type NetworkReservation = {
   buyer_user_id?: string;
   buyer_name?: string;
   buyer_email?: string;
+  buyer_role?: "mechanic" | "consumer";
+  sale_id?: string;
+  paid_amount: number;
+  due_amount: number;
   qty: number;
   unit_price: number;
   total_amount: number;

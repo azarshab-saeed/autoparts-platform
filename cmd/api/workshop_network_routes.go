@@ -199,7 +199,7 @@ func registerWorkshopNetworkRoutes(protected *http.ServeMux, pool *pgxpool.Pool)
 		api.WriteJSON(w, http.StatusOK, map[string]any{"items": items})
 	})))
 
-	protected.Handle("POST /v1/mechanic/trade-requests/reservations/{id}", auth.RequireRoles("mechanic")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	protected.Handle("POST /v1/mechanic/reservations/{id}/trade-charge", auth.RequireRoles("mechanic")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		c, _ := auth.ClaimsFrom(r.Context())
 		id, err := routeUUID(r, "id")
 		if err != nil {

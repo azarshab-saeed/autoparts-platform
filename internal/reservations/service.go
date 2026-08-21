@@ -31,6 +31,9 @@ func (s *Service) Create(ctx context.Context, cmd CreateCommand) (Reservation, e
 	if strings.TrimSpace(cmd.IdempotencyKey) == "" {
 		return Reservation{}, errors.New("idempotency key is required")
 	}
+	if cmd.BuyerRole != "mechanic" && cmd.BuyerRole != "consumer" {
+		return Reservation{}, errors.New("buyer role must be mechanic or consumer")
+	}
 	// Free expired holds before evaluating currently available stock. A failed
 	// sweep should not make reservation creation unsafe; the locked balance and
 	// availability check below are still the source of truth.
@@ -45,13 +48,14 @@ func (s *Service) Create(ctx context.Context, cmd CreateCommand) (Reservation, e
 	var existing Reservation
 	err = tx.QueryRow(ctx, `
       SELECT r.id,r.offer_id,r.product_id,p.title,r.store_id,s.name,COALESCE(s.public_address,''),COALESCE(s.public_phone,''),
-             r.buyer_user_id,r.buyer_name,r.buyer_email,r.qty::float8,r.unit_price,r.total_amount,r.status,r.expires_at,r.created_at,r.updated_at
+             r.buyer_user_id,r.buyer_name,r.buyer_email,COALESCE(r.buyer_role,''),r.sale_id,COALESCE(sale.paid_amount,0),COALESCE(sale.due_amount,0),r.qty::float8,r.unit_price,r.total_amount,r.status,r.expires_at,r.created_at,r.updated_at
       FROM network_reservations r
       JOIN stores s ON s.id=r.store_id AND s.tenant_id=r.tenant_id
       JOIN products p ON p.id=r.product_id AND p.tenant_id=r.tenant_id
+      LEFT JOIN sales sale ON sale.id=r.sale_id
       WHERE r.buyer_user_id=$1 AND r.idempotency_key=$2`, cmd.BuyerUserID, cmd.IdempotencyKey).
 		Scan(&existing.ID, &existing.OfferID, &existing.ProductID, &existing.ProductTitle, &existing.StoreID, &existing.StoreName, &existing.Address, &existing.Phone,
-			&existing.BuyerUserID, &existing.BuyerName, &existing.BuyerEmail, &existing.Qty, &existing.UnitPrice, &existing.TotalAmount, &existing.Status, &existing.ExpiresAt, &existing.CreatedAt, &existing.UpdatedAt)
+			&existing.BuyerUserID, &existing.BuyerName, &existing.BuyerEmail, &existing.BuyerRole, &existing.SaleID, &existing.PaidAmount, &existing.DueAmount, &existing.Qty, &existing.UnitPrice, &existing.TotalAmount, &existing.Status, &existing.ExpiresAt, &existing.CreatedAt, &existing.UpdatedAt)
 	if err == nil {
 		return existing, tx.Commit(ctx)
 	}
@@ -95,6 +99,7 @@ func (s *Service) Create(ctx context.Context, cmd CreateCommand) (Reservation, e
 	r.BuyerUserID = cmd.BuyerUserID
 	r.BuyerName = strings.TrimSpace(cmd.BuyerName)
 	r.BuyerEmail = strings.TrimSpace(cmd.BuyerEmail)
+	r.BuyerRole = cmd.BuyerRole
 	r.Qty = cmd.Qty
 	r.TotalAmount = int64(math.Round(totalFloat))
 	r.Status = "pending"
@@ -104,9 +109,9 @@ func (s *Service) Create(ctx context.Context, cmd CreateCommand) (Reservation, e
 		return Reservation{}, err
 	}
 	err = tx.QueryRow(ctx, `
-      INSERT INTO network_reservations(id,tenant_id,store_id,warehouse_id,offer_id,product_id,buyer_user_id,buyer_name,buyer_email,qty,unit_price,total_amount,status,idempotency_key,expires_at)
-      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'pending',$13,$14)
-      RETURNING created_at,updated_at`, r.ID, tenantID, r.StoreID, warehouseID, r.OfferID, r.ProductID, r.BuyerUserID, r.BuyerName, r.BuyerEmail, r.Qty, r.UnitPrice, r.TotalAmount, cmd.IdempotencyKey, r.ExpiresAt).
+      INSERT INTO network_reservations(id,tenant_id,store_id,warehouse_id,offer_id,product_id,buyer_user_id,buyer_name,buyer_email,buyer_role,qty,unit_price,total_amount,status,idempotency_key,expires_at)
+      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'pending',$14,$15)
+      RETURNING created_at,updated_at`, r.ID, tenantID, r.StoreID, warehouseID, r.OfferID, r.ProductID, r.BuyerUserID, r.BuyerName, r.BuyerEmail, r.BuyerRole, r.Qty, r.UnitPrice, r.TotalAmount, cmd.IdempotencyKey, r.ExpiresAt).
 		Scan(&r.CreatedAt, &r.UpdatedAt)
 	if err != nil {
 		return Reservation{}, err
@@ -333,14 +338,15 @@ func releaseStock(ctx context.Context, tx pgx.Tx, tenantID, warehouseID, product
 
 const reservationSelect = `
  SELECT r.id,r.offer_id,r.product_id,p.title,r.store_id,s.name,COALESCE(s.public_address,''),COALESCE(s.public_phone,''),
-        r.buyer_user_id,r.buyer_name,r.buyer_email,r.qty::float8,r.unit_price,r.total_amount,r.status,r.expires_at,r.created_at,r.updated_at,
+        r.buyer_user_id,r.buyer_name,r.buyer_email,COALESCE(r.buyer_role,''),r.sale_id,COALESCE(sale.paid_amount,0),COALESCE(sale.due_amount,0),r.qty::float8,r.unit_price,r.total_amount,r.status,r.expires_at,r.created_at,r.updated_at,
         r.tenant_id,r.warehouse_id
  FROM network_reservations r
  JOIN stores s ON s.id=r.store_id AND s.tenant_id=r.tenant_id
- JOIN products p ON p.id=r.product_id AND p.tenant_id=r.tenant_id`
+ JOIN products p ON p.id=r.product_id AND p.tenant_id=r.tenant_id
+ LEFT JOIN sales sale ON sale.id=r.sale_id`
 
 func reservationScan(r *Reservation, tenantID, warehouseID *uuid.UUID) []any {
-	return []any{&r.ID, &r.OfferID, &r.ProductID, &r.ProductTitle, &r.StoreID, &r.StoreName, &r.Address, &r.Phone, &r.BuyerUserID, &r.BuyerName, &r.BuyerEmail, &r.Qty, &r.UnitPrice, &r.TotalAmount, &r.Status, &r.ExpiresAt, &r.CreatedAt, &r.UpdatedAt, tenantID, warehouseID}
+	return []any{&r.ID, &r.OfferID, &r.ProductID, &r.ProductTitle, &r.StoreID, &r.StoreName, &r.Address, &r.Phone, &r.BuyerUserID, &r.BuyerName, &r.BuyerEmail, &r.BuyerRole, &r.SaleID, &r.PaidAmount, &r.DueAmount, &r.Qty, &r.UnitPrice, &r.TotalAmount, &r.Status, &r.ExpiresAt, &r.CreatedAt, &r.UpdatedAt, tenantID, warehouseID}
 }
 
 type rowScanner interface{ Scan(...any) error }

@@ -47,7 +47,7 @@ var (
 	buildTime = "unknown"
 )
 
-const latestMigration = "024_management_intelligence.sql"
+const latestMigration = "025_network_credit_fulfillment.sql"
 
 func main() {
 	log.SetFlags(0)
@@ -1649,7 +1649,7 @@ func main() {
 			api.WriteError(w, api.BadRequest("missing_idempotency_key", "Idempotency-Key header is required"))
 			return
 		}
-		out, err := reservationSvc.Create(r.Context(), reservations.CreateCommand{OfferID: in.OfferID, Qty: in.Qty, BuyerUserID: c.UserID, BuyerName: c.Name, BuyerEmail: c.Email, IdempotencyKey: key})
+		out, err := reservationSvc.Create(r.Context(), reservations.CreateCommand{OfferID: in.OfferID, Qty: in.Qty, BuyerUserID: c.UserID, BuyerName: c.Name, BuyerEmail: c.Email, BuyerRole: c.Role, IdempotencyKey: key})
 		if err != nil {
 			api.WriteError(w, api.Conflict("reservation_rejected", err.Error()))
 			return
