@@ -543,3 +543,11 @@ At the end of each completed phase:
 6. do not silently renumber or reorder planned phases without documenting why.
 
 This file is the canonical product-direction checkpoint for continuing development across ChatGPT/Codex sessions.
+
+
+## Phase 15.17 — Management Intelligence & Mechanic Network — DONE
+
+- Phase 15.16.2: mechanic vehicle onboarding, QR notebook creation and workshop job cards.
+- Phase 15.16.3: mechanic↔store bilateral trade ledger, debt/credit visibility and confirmed settlements.
+- Phase 15.17: store management intelligence, user performance, inventory/customer/mechanic signals and recommended actions.
+- Iranian Modian integration remains deferred to the final integration gate.

@@ -85,7 +85,7 @@ func registerVehicleNotebookRoutes(public, protected *http.ServeMux, pool *pgxpo
 			api.WriteError(w, api.BadRequest("invalid_vehicle_token", "vehicle QR token is invalid"))
 			return
 		}
-		out, err := svc.ByToken(r.Context(), token, c.TenantID, c.StoreID)
+		out, err := svc.ByTokenForViewer(r.Context(), token, c.UserID, c.TenantID, c.StoreID)
 		if err != nil {
 			api.WriteError(w, api.NotFound("vehicle_notebook_not_found", err.Error()))
 			return

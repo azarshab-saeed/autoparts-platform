@@ -27,6 +27,7 @@ const nav: NavItem[] = [
   {href:"/store/hardware",label:"چاپگر و سخت‌افزار",icon:SettingsIcon,group:"عملیات",roles:["owner","admin"]},
   {href:"/store/documents",label:"طراحی فاکتور و بارکد",icon:SettingsIcon,group:"عملیات",roles:["owner","admin","cashier","warehouse","accountant"]},
   {href:"/store/vehicle-notebook",label:"دفتر خودرو",icon:UsersIcon,group:"عملیات",roles:["owner","admin","cashier","warehouse","accountant"],mobile:true},
+  {href:"/store/mechanics",label:"حساب مکانیک‌ها",icon:UsersIcon,group:"شبکه",roles:["owner","admin","cashier","accountant"]},
   {href:"/store/network",label:"شبکه قطعات",icon:SearchIcon,group:"شبکه"},
   {href:"/store/procurement",label:"تأمین از شبکه",icon:BoxIcon,group:"شبکه",mobile:true},
   {href:"/store/orders",label:"سفارش‌های شبکه",icon:CartIcon,group:"شبکه",mobile:true},
@@ -39,6 +40,7 @@ const nav: NavItem[] = [
   {href:"/store/closing",label:"صندوق و بستن روز",icon:ChartIcon,group:"مالی و کنترل",roles:["owner","admin","cashier","accountant"]},
   {href:"/store/returns",label:"مرجوعی",icon:CartIcon,group:"مالی و کنترل"},
   {href:"/store/reports",label:"گزارش‌ها",icon:ChartIcon,group:"مالی و کنترل",roles:["owner","admin","accountant"]},
+  {href:"/store/intelligence",label:"هوش مدیریتی",icon:ChartIcon,group:"مالی و کنترل",roles:["owner","admin","accountant"],mobile:true},
   {href:"/store/audit",label:"رویدادهای امنیتی",icon:SettingsIcon,group:"مالی و کنترل",roles:["owner","admin"]},
   {href:"#",label:"تنظیمات",icon:SettingsIcon,group:"مالی و کنترل",soon:true},
 ];

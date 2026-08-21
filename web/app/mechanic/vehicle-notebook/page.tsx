@@ -1,5 +1,2 @@
-import VehicleNotebookWorkspace from "@/components/vehicle-notebook-workspace";
-
-export default function MechanicVehicleNotebookPage() {
-  return <VehicleNotebookWorkspace mechanic />;
-}
+import MechanicVehicleNotebookWorkspace from "@/components/mechanic-vehicle-notebook-workspace";
+export default function Page(){return <MechanicVehicleNotebookWorkspace/>}

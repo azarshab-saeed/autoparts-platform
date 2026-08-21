@@ -47,7 +47,7 @@ var (
 	buildTime = "unknown"
 )
 
-const latestMigration = "021_vehicle_notebook.sql"
+const latestMigration = "024_management_intelligence.sql"
 
 func main() {
 	log.SetFlags(0)
@@ -89,6 +89,8 @@ func main() {
 	public := http.NewServeMux()
 	protected := http.NewServeMux()
 	registerVehicleNotebookRoutes(public, protected, pool)
+	registerWorkshopNetworkRoutes(protected, pool)
+	registerManagementRoutes(protected, pool)
 
 	public.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		api.WriteJSON(w, http.StatusOK, map[string]any{"status": "ok", "service": "autoparts-api", "version": version})
@@ -1413,6 +1415,10 @@ func main() {
 			api.WriteError(w, api.Conflict("sale_return_rejected", err.Error()))
 			return
 		}
+		if _, err := pool.Exec(r.Context(), `UPDATE sales_returns SET actor_user_id=$2,actor_role=$3 WHERE id=$1`, out.ID, c.UserID, c.Role); err != nil {
+			api.WriteError(w, api.Conflict("return_actor_attribution_failed", err.Error()))
+			return
+		}
 		api.WriteJSON(w, http.StatusCreated, out)
 	})))
 	protected.Handle("POST /v1/returns/purchases", auth.RequireRoles("owner", "admin", "warehouse", "accountant")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1737,6 +1743,10 @@ func main() {
 			api.WriteError(w, api.Conflict("reservation_fulfillment_rejected", err.Error()))
 			return
 		}
+		if _, err := pool.Exec(r.Context(), `UPDATE sales SET actor_user_id=$2,actor_role=$3 WHERE id=$1`, out.SaleID, c.UserID, c.Role); err != nil {
+			api.WriteError(w, api.Conflict("sale_actor_attribution_failed", err.Error()))
+			return
+		}
 		api.WriteJSON(w, http.StatusCreated, out)
 	})))
 
@@ -1759,6 +1769,10 @@ func main() {
 		out, err := salesSvc.Create(r.Context(), cmd)
 		if err != nil {
 			api.WriteError(w, api.Conflict("sale_rejected", err.Error()))
+			return
+		}
+		if _, err := pool.Exec(r.Context(), `UPDATE sales SET actor_user_id=$2,actor_role=$3 WHERE id=$1`, out.ID, c.UserID, c.Role); err != nil {
+			api.WriteError(w, api.Conflict("sale_actor_attribution_failed", err.Error()))
 			return
 		}
 		api.WriteJSON(w, http.StatusCreated, out)

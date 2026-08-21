@@ -95,7 +95,7 @@ export default function MechanicPage(){
     <header className="mechanic-header">
       <Link href="/mechanic" className="mechanic-brand"><span>ی</span><div><b>شبکه قطعات</b><small>موجودی واقعی فروشگاه‌ها</small></div></Link>
       <div className="mechanic-account">
-        {ready&&session ? <><span className="account-name">{session.displayName}</span>{(session.role==="mechanic"||session.role==="consumer")&&<Link className="orders-link" href="/mechanic/orders">رزروهای من</Link>}{session.role==="mechanic"&&<Link className="orders-link" href="/mechanic/vehicle-notebook">دفتر خودرو</Link>}{session.role!=="mechanic"&&session.role!=="consumer"&&<Link className="orders-link" href="/store">پنل فروشگاه</Link>}<button onClick={()=>void logout()}>خروج</button></>:
+        {ready&&session ? <><span className="account-name">{session.displayName}</span>{(session.role==="mechanic"||session.role==="consumer")&&<Link className="orders-link" href="/mechanic/orders">رزروهای من</Link>}{session.role==="mechanic"&&<Link className="orders-link" href="/mechanic/vehicle-notebook">دفتر خودرو</Link>}{session.role==="mechanic"&&<Link className="orders-link" href="/mechanic/workshop">کارگاه من</Link>}{session.role==="mechanic"&&<Link className="orders-link" href="/mechanic/accounts">حساب فروشگاه‌ها</Link>}{session.role!=="mechanic"&&session.role!=="consumer"&&<Link className="orders-link" href="/store">پنل فروشگاه</Link>}<button onClick={()=>void logout()}>خروج</button></>:
           <button className="mechanic-login" onClick={()=>void login("/mechanic")}>ورود / رزرو قطعه</button>}
       </div>
     </header>
