@@ -1976,6 +1976,7 @@ func main() {
 		}
 		api.WriteJSON(w, http.StatusOK, map[string]any{"items": out, "count": len(out)})
 	})))
+	root.Handle("/v1/public/vehicle-notebook/", public)
 	root.Handle("/v1/", protectedHandler)
 	root.Handle("/healthz", public)
 	root.HandleFunc("GET /readyz", func(w http.ResponseWriter, r *http.Request) {
